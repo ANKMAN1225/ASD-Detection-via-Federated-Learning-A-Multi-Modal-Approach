@@ -73,7 +73,7 @@ def get_experiment_configs() -> List[dict]:
     base_config = {
         "facial_data_path": facial_path,
         "video_data_path": "../SSBD-file",
-        "num_rounds": 10,
+        "num_rounds": 100,
         "local_epochs": 2,
         "learning_rate": 0.001,
         "batch_size": 16,
@@ -90,7 +90,7 @@ def get_experiment_configs() -> List[dict]:
         "use_differential_privacy": False,
         "noise_multiplier": 0.0,
     }
-
+    '''
     config_non_iid = {
         **base_config,
         "experiment_name": "Non_IID_Distribution",
@@ -100,7 +100,7 @@ def get_experiment_configs() -> List[dict]:
         "use_differential_privacy": False,
         "noise_multiplier": 0.0,
     }
-
+'''
     config_privacy = {
         **base_config,
         "experiment_name": "With_Differential_Privacy",
@@ -111,4 +111,4 @@ def get_experiment_configs() -> List[dict]:
         "noise_multiplier": 0.1,
     }
 
-    return [config_iid, config_non_iid, config_privacy]
+    return [config_iid, config_privacy]
