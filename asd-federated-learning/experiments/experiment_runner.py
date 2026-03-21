@@ -49,9 +49,48 @@ class CompleteFederatedTrainer:
 
     def prepare_datasets(
         self,
-    ) -> Tuple[List[DataLoader], List[DataLoader]]:
-        """Prepare federated datasets for training and testing."""
-        transform = transforms.Compose(
+    ) -> Tuple[List[DataLoader], List[DataLoader], List[DataLoader]]:
+        """Prepare federated datasets for training, validation, and testing."""
+        facial_train_rotation = float(
+            self.config.get("facial_train_rotation_degrees", 15.0)
+        )
+        facial_color_jitter = float(
+            self.config.get("facial_color_jitter_strength", 0.2)
+        )
+        facial_train_augmentation = bool(
+            self.config.get("facial_train_augmentation", True)
+        )
+
+        train_transform_ops: List[Any] = [
+            transforms.Resize((224, 224)),
+        ]
+        if facial_train_augmentation:
+            train_transform_ops.extend(
+                [
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.RandomRotation(
+                        degrees=facial_train_rotation,
+                        interpolation=transforms.InterpolationMode.BILINEAR,
+                    ),
+                    transforms.ColorJitter(
+                        brightness=facial_color_jitter,
+                        contrast=facial_color_jitter,
+                        saturation=facial_color_jitter,
+                        hue=0.05,
+                    ),
+                ]
+            )
+        train_transform_ops.extend(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225],
+                ),
+            ]
+        )
+
+        eval_transform = transforms.Compose(
             [
                 transforms.Resize((224, 224)),
                 transforms.ToTensor(),
@@ -61,33 +100,54 @@ class CompleteFederatedTrainer:
                 ),
             ]
         )
+        train_transform = transforms.Compose(train_transform_ops)
 
         facial_path = self.config["facial_data_path"]
         if os.path.exists(facial_path):
             try:
                 train_facial = FacialDataset(
-                    facial_path, "train", transform=transform
+                    facial_path, "train", transform=None
+                )
+                valid_facial = FacialDataset(
+                    facial_path, "valid", transform=None
                 )
                 test_facial = FacialDataset(
-                    facial_path, "test", transform=transform
+                    facial_path, "test", transform=None
                 )
 
+                # Apply augmentation only during actual training (after split creation).
+                train_facial.transform = train_transform
+                valid_facial.transform = eval_transform
+                test_facial.transform = eval_transform
+
                 print(
-                    f"Loaded facial dataset: {len(train_facial)} training, "
+                    "Loaded facial dataset: "
+                    f"{len(train_facial)} training, {len(valid_facial)} validation, "
                     f"{len(test_facial)} testing samples"
                 )
 
-                if len(train_facial) == 0 or len(test_facial) == 0:
+                if (
+                    len(train_facial) == 0
+                    or len(valid_facial) == 0
+                    or len(test_facial) == 0
+                ):
                     print(
                         "Facial dataset is empty (missing train/autistic, "
-                        "train/non_autistic, test/autistic, test/non_autistic). "
+                        "train/non_autistic, valid/test autistic/non_autistic). "
                         "Using dummy data."
                     )
                     federated_train_facial = [None] * self.config["num_clients"]
+                    federated_valid_facial = [None] * self.config["num_clients"]
                     federated_test_facial = [None] * self.config["num_clients"]
                 else:
                     federated_train_facial = create_federated_data_splits(
                         train_facial,
+                        self.config["num_clients"],
+                        iid=self.config["iid"],
+                        alpha=self.config["alpha"],
+                    )
+                    federated_valid_facial = create_federated_data_splits(
+                        valid_facial,
                         self.config["num_clients"],
                         iid=self.config["iid"],
                         alpha=self.config["alpha"],
@@ -102,13 +162,16 @@ class CompleteFederatedTrainer:
                 print(f"Error loading facial dataset: {e}")
                 print("Using dummy data instead.")
                 federated_train_facial = [None] * self.config["num_clients"]
+                federated_valid_facial = [None] * self.config["num_clients"]
                 federated_test_facial = [None] * self.config["num_clients"]
         else:
             print("Facial dataset path not found. Using dummy data.")
             federated_train_facial = [None] * self.config["num_clients"]
+            federated_valid_facial = [None] * self.config["num_clients"]
             federated_test_facial = [None] * self.config["num_clients"]
 
         train_loaders: List[DataLoader] = []
+        val_loaders: List[DataLoader] = []
         test_loaders: List[DataLoader] = []
 
         for i in range(self.config["num_clients"]):
@@ -118,6 +181,14 @@ class CompleteFederatedTrainer:
                     batch_size=self.config["batch_size"],
                     shuffle=True,
                 )
+                if federated_valid_facial[i] is not None:
+                    val_loader = DataLoader(
+                        federated_valid_facial[i],
+                        batch_size=self.config["batch_size"],
+                        shuffle=False,
+                    )
+                else:
+                    val_loader = self._create_dummy_loader(is_train=False)
                 test_loader = DataLoader(
                     federated_test_facial[i],
                     batch_size=self.config["batch_size"],
@@ -125,12 +196,14 @@ class CompleteFederatedTrainer:
                 )
             else:
                 train_loader = self._create_dummy_loader(is_train=True)
+                val_loader = self._create_dummy_loader(is_train=False)
                 test_loader = self._create_dummy_loader(is_train=False)
 
             train_loaders.append(train_loader)
+            val_loaders.append(val_loader)
             test_loaders.append(test_loader)
 
-        return train_loaders, test_loaders
+        return train_loaders, val_loaders, test_loaders
 
     def _create_dummy_loader(self, is_train: bool = True) -> DataLoader:
         """Create dummy data loader for demonstration."""
@@ -151,7 +224,7 @@ class CompleteFederatedTrainer:
         print("FACIAL DATA FEDERATED EXPERIMENT")
         print("=" * 50)
 
-        train_loaders, test_loaders = self.prepare_datasets()
+        train_loaders, val_loaders, test_loaders = self.prepare_datasets()
 
         global_model = MobileNetFeatureExtractor(num_classes=2)
 
@@ -162,6 +235,7 @@ class CompleteFederatedTrainer:
                 client_id=i,
                 model=client_model,
                 train_loader=train_loaders[i],
+                val_loader=val_loaders[i],
                 test_loader=test_loaders[i],
                 device=self.config["device"],
             )
@@ -178,6 +252,26 @@ class CompleteFederatedTrainer:
         num_rounds = self.config["num_rounds"]
         print(f"\nStarting federated training for {num_rounds} rounds...")
 
+        use_early_stopping = bool(self.config.get("early_stopping_enabled", True))
+        patience = int(self.config.get("early_stopping_patience", 10))
+        min_delta = float(self.config.get("early_stopping_min_delta", 0.0))
+        eval_every_n_rounds = int(
+            self.config.get("early_stopping_eval_every_n_rounds", 2)
+        )
+        early_stopping_metric_split = str(
+            self.config.get("early_stopping_metric_split", "test")
+        ).lower()
+        if early_stopping_metric_split not in ("valid", "test"):
+            early_stopping_metric_split = "test"
+
+        best_global_accuracy = float("-inf")
+        best_state_dict: Optional[Dict[str, torch.Tensor]] = None
+        bad_evals = 0
+        best_round = 0
+        stopped_round = 0
+        eval_count = 0
+        eval_accuracy_log: List[Dict] = []  # stores {round, accuracy} for each evaluated round
+
         for round_num in range(num_rounds):
             print(f"\n--- Round {round_num + 1}/{num_rounds} ---")
 
@@ -188,18 +282,70 @@ class CompleteFederatedTrainer:
 
             print(f"Round {round_num + 1} - Avg Loss: {round_metrics['avg_loss']:.4f}")
 
-            if (round_num + 1) % 2 == 0:
-                eval_metrics = server.evaluate_global_model()
-                print(
-                    f"Round {round_num + 1} - Global Accuracy: "
-                    f"{eval_metrics['global_accuracy']:.2f}%"
+            should_eval = (
+                (round_num + 1) % eval_every_n_rounds == 0
+                or (round_num + 1) == num_rounds
+            )
+            if should_eval:
+                eval_count += 1
+                eval_metrics = server.evaluate_global_model(
+                    split=early_stopping_metric_split, include_predictions=False
                 )
+                global_acc = eval_metrics["global_accuracy"]
+                print(
+                    f"Round {round_num + 1} - Global Accuracy ({early_stopping_metric_split}): {global_acc:.2f}%"
+                )
+                eval_accuracy_log.append(
+                    {
+                        "round": round_num + 1,
+                        "accuracy": global_acc,
+                        "split": early_stopping_metric_split,
+                    }
+                )
+
+                if use_early_stopping:
+                    improved = global_acc > (best_global_accuracy + min_delta)
+                    if improved:
+                        best_global_accuracy = global_acc
+                        best_round = round_num + 1
+                        best_state_dict = {
+                            k: v.detach().clone()
+                            for k, v in server.global_model.state_dict().items()
+                        }
+                        bad_evals = 0
+                    else:
+                        bad_evals += 1
+                        if bad_evals >= patience:
+                            stopped_round = round_num + 1
+                            print(
+                                "Early stopping triggered. "
+                                f"Best global accuracy ({early_stopping_metric_split}) "
+                                f"{best_global_accuracy:.2f}% at round {best_round}."
+                            )
+                            break
+                else:
+                    # Track best even when early stopping is disabled.
+                    if global_acc > best_global_accuracy:
+                        best_global_accuracy = global_acc
+                        best_round = round_num + 1
+                        best_state_dict = {
+                            k: v.detach().clone()
+                            for k, v in server.global_model.state_dict().items()
+                        }
+
+        if stopped_round == 0:
+            stopped_round = num_rounds
 
         print("\n" + "-" * 30)
         print("FINAL EVALUATION")
         print("-" * 30)
 
-        final_metrics = server.evaluate_global_model()
+        if best_state_dict is not None:
+            server.global_model.load_state_dict(best_state_dict)
+
+        final_metrics = server.evaluate_global_model(
+            split="test", include_predictions=True
+        )
 
         print(f"Final Global Accuracy: {final_metrics['global_accuracy']:.2f}%")
         print(f"Total Samples: {final_metrics['total_samples']}")
@@ -214,7 +360,19 @@ class CompleteFederatedTrainer:
         self.results["facial_experiment"] = {
             "round_metrics": server.round_metrics,
             "final_metrics": final_metrics,
+            "eval_accuracy_log": eval_accuracy_log,
             "config": self.config,
+            "early_stopping": {
+                "enabled": use_early_stopping,
+                "metric_split": early_stopping_metric_split,
+                "best_global_accuracy": best_global_accuracy,
+                "best_round": best_round,
+                "stopped_round": stopped_round,
+                "num_metric_evaluations": eval_count,
+                "patience": patience,
+                "min_delta": min_delta,
+                "eval_every_n_rounds": eval_every_n_rounds,
+            },
         }
 
         # Save trained model to disk (so you don't need to retrain)
@@ -222,7 +380,7 @@ class CompleteFederatedTrainer:
         exp_name = self.config.get("experiment_name", "default")
         model_path = os.path.join(SAVED_MODELS_DIR, f"{exp_name}_model.pt")
         torch.save(server.global_model.state_dict(), model_path)
-        print(f"✓ Model saved to {model_path}")
+        print(f"Model saved to {model_path}")
 
         return self.results["facial_experiment"]
 
@@ -345,10 +503,10 @@ def load_saved_results() -> Optional[Dict[str, Any]]:
         try:
             with open(SAVED_RESULTS_PATH, "rb") as f:
                 results = pickle.load(f)
-            print(f"✓ Loaded saved results from {SAVED_RESULTS_PATH}")
+            print(f"Loaded saved results from {SAVED_RESULTS_PATH}")
             return results
         except Exception as e:
-            print(f"⚠ Could not load saved results: {e}")
+            print(f"WARNING: Could not load saved results: {e}")
     return None
 
 
@@ -357,7 +515,7 @@ def save_results(results: Dict[str, Any]) -> None:
     os.makedirs(os.path.dirname(SAVED_RESULTS_PATH), exist_ok=True)
     with open(SAVED_RESULTS_PATH, "wb") as f:
         pickle.dump(results, f)
-    print(f"✓ Results saved to {SAVED_RESULTS_PATH}")
+    print(f"Results saved to {SAVED_RESULTS_PATH}")
 
 
 def run_experiments(skip_training_if_saved: bool = False) -> Dict:
@@ -403,7 +561,7 @@ def run_experiments(skip_training_if_saved: bool = False) -> Dict:
             all_experimental_results[experiment_name] = experiment_results
 
             evaluator.evaluate_experiment(experiment_name, experiment_results)
-            print(f"✓ {experiment_name} completed successfully")
+            print(f"{experiment_name} completed successfully")
 
         except Exception as e:
             print(f"✗ Error in {experiment_name}: {e}")

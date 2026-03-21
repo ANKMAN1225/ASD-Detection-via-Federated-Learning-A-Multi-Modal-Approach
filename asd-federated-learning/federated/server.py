@@ -21,20 +21,24 @@ class FederatedServer:
     def federated_averaging(
         self, client_params: List[Dict], client_weights: List[int]
     ) -> Dict:
-        """Perform federated averaging of client parameters (FedAvg)."""
-        # Weighted average based on number of samples
+        """Perform federated averaging of full state_dict (FedAvg).
+
+        Uses state_dict keys so that BatchNorm running_mean, running_var,
+        and num_batches_tracked buffers are also averaged — not just the
+        trainable parameters. Averaging is done in float32 and cast back
+        to the original dtype to handle integer buffers (e.g. num_batches_tracked).
+        """
         total_samples = sum(client_weights)
         averaged_params = {}
 
-        # Initialize with zeros
         for name in client_params[0].keys():
-            averaged_params[name] = torch.zeros_like(client_params[0][name])
-
-        # Weighted sum
-        for client_param, weight in zip(client_params, client_weights):
-            weight_ratio = weight / total_samples
-            for name in averaged_params.keys():
-                averaged_params[name] += client_param[name] * weight_ratio
+            orig_dtype = client_params[0][name].dtype
+            # Accumulate weighted average in float32
+            avg = torch.zeros_like(client_params[0][name], dtype=torch.float32)
+            for client_param, weight in zip(client_params, client_weights):
+                avg += client_param[name].float() * (weight / total_samples)
+            # Cast back to original dtype (handles int64 num_batches_tracked)
+            averaged_params[name] = avg.to(orig_dtype)
 
         return averaged_params
 
@@ -42,14 +46,14 @@ class FederatedServer:
         """Execute one round of federated training."""
         print("Starting training round...")
 
-        # Distribute global model to all clients
-        global_params = {
-            name: param.clone().detach()
-            for name, param in self.global_model.named_parameters()
+        # Distribute full global state_dict to all clients (includes BN buffers)
+        global_state = {
+            k: v.clone().detach()
+            for k, v in self.global_model.state_dict().items()
         }
 
         for client in self.clients:
-            client.set_model_params(global_params)
+            client.set_model_params(global_state)
 
         # Local training at each client
         client_params = []
@@ -63,13 +67,11 @@ class FederatedServer:
             client_weights.append(metrics["samples"])
             client_metrics.append(metrics)
 
-        # Federated averaging
+        # Federated averaging over full state_dict
         averaged_params = self.federated_averaging(client_params, client_weights)
 
         # Update global model
-        with torch.no_grad():
-            for name, param in self.global_model.named_parameters():
-                param.copy_(averaged_params[name])
+        self.global_model.load_state_dict(averaged_params)
 
         # Aggregate metrics
         total_samples = sum(client_weights)
@@ -87,38 +89,55 @@ class FederatedServer:
         self.round_metrics.append(round_metrics)
         return round_metrics
 
-    def evaluate_global_model(self) -> Dict:
-        """Evaluate global model on all client test sets."""
+    def evaluate_global_model(
+        self, split: str = "test", include_predictions: bool = True
+    ) -> Dict:
+        """Evaluate global model on all client datasets.
+
+        Args:
+            split: Which split to evaluate on: "valid" or "test".
+            include_predictions: If False, skip collecting predictions/targets.
+        """
         print("Evaluating global model...")
 
-        # Distribute global model to all clients
-        global_params = {
-            name: param.clone().detach()
-            for name, param in self.global_model.named_parameters()
+        # Distribute full global state_dict (includes BN buffers)
+        global_state = {
+            k: v.clone().detach()
+            for k, v in self.global_model.state_dict().items()
         }
 
-        all_metrics = []
+        all_metrics: List[Dict] = []
         total_samples = 0
         total_correct = 0.0
-        all_preds = []
-        all_targets = []
+        all_preds: List = []
+        all_targets: List = []
 
         for client in self.clients:
-            client.set_model_params(global_params)
-            metrics = client.local_test()
+            client.set_model_params(global_state)
+            if split == "valid":
+                metrics = client.local_validate(
+                    include_predictions=include_predictions
+                )
+            else:
+                metrics = client.local_test(
+                    include_predictions=include_predictions
+                )
             all_metrics.append(metrics)
 
             total_samples += metrics["samples"]
             total_correct += (metrics["accuracy"] / 100) * metrics["samples"]
-            all_preds.extend(metrics["predictions"])
-            all_targets.extend(metrics["targets"])
+            if include_predictions:
+                all_preds.extend(metrics.get("predictions", []))
+                all_targets.extend(metrics.get("targets", []))
 
         global_accuracy = (total_correct / total_samples) * 100 if total_samples > 0 else 0.0
 
-        return {
+        metrics: Dict[str, object] = {
             "global_accuracy": global_accuracy,
             "client_metrics": all_metrics,
-            "predictions": all_preds,
-            "targets": all_targets,
             "total_samples": total_samples,
         }
+        if include_predictions:
+            metrics["predictions"] = all_preds
+            metrics["targets"] = all_targets
+        return metrics  # type: ignore[return-value]

@@ -42,6 +42,18 @@ class Config:
     random_seed: int = 42
     device: str = None
 
+    # Early stopping (for central evaluation/selection)
+    early_stopping_enabled: bool = True
+    early_stopping_patience: int = 5
+    early_stopping_min_delta: float = 0.0
+    early_stopping_eval_every_n_rounds: int = 1
+    early_stopping_metric_split: str = "valid"
+
+    # Facial data augmentation (helps reduce overfitting)
+    facial_train_augmentation: bool = True
+    facial_train_rotation_degrees: float = 15.0
+    facial_color_jitter_strength: float = 0.1
+
     # Experiment name (set per experiment)
     experiment_name: str = "default"
 
@@ -79,6 +91,16 @@ def get_experiment_configs() -> List[dict]:
         "batch_size": 16,
         "sequence_length": 16,
         "device": "cuda" if torch.cuda.is_available() else "cpu",
+        # Early stopping settings
+        "early_stopping_enabled": True,
+        "early_stopping_patience": 5,
+        "early_stopping_min_delta": 0.0,
+        "early_stopping_eval_every_n_rounds": 1,
+        "early_stopping_metric_split": "valid",
+        # Facial augmentation settings
+        "facial_train_augmentation": True,
+        "facial_train_rotation_degrees": 15.0,
+        "facial_color_jitter_strength": 0.1,
     }
 
     config_iid = {
@@ -90,17 +112,7 @@ def get_experiment_configs() -> List[dict]:
         "use_differential_privacy": False,
         "noise_multiplier": 0.0,
     }
-    '''
-    config_non_iid = {
-        **base_config,
-        "experiment_name": "Non_IID_Distribution",
-        "num_clients": 5,
-        "iid": False,
-        "alpha": 0.3,
-        "use_differential_privacy": False,
-        "noise_multiplier": 0.0,
-    }
-'''
+
     config_privacy = {
         **base_config,
         "experiment_name": "With_Differential_Privacy",

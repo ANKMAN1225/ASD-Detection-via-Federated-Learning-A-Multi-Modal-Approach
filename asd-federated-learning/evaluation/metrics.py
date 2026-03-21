@@ -51,8 +51,14 @@ class ComprehensiveEvaluator:
         self, experiment_name: str, results: Dict
     ) -> Dict[str, Dict]:
         """Evaluate single experiment results."""
+        final_global_accuracy = (
+            results.get("facial_experiment", {})
+            .get("final_metrics", {})
+            .get("global_accuracy", 0.0)
+        )
         evaluation = {
             "experiment_name": experiment_name,
+            "final_global_accuracy": final_global_accuracy,
             "convergence_analysis": self.analyze_convergence(results),
             "privacy_analysis": self.analyze_privacy(results),
             "communication_efficiency": self.analyze_communication(results),
@@ -179,16 +185,15 @@ class ComprehensiveEvaluator:
             return
 
         print(
-            f"\n{'Experiment':<25} {'Final Acc':<12} {'Privacy':<10} {'Fairness':<10} {'Converged':<10}"
+            f"\n{'Experiment':<25} {'Global Acc':<12} {'Privacy':<10} {'Fairness':<10}"
         )
         print("-" * 80)
 
         for exp_name, eval_data in self.all_results.items():
-            convergence = eval_data.get("convergence_analysis", {})
             privacy = eval_data.get("privacy_analysis", {})
             fairness = eval_data.get("fairness_analysis", {})
 
-            final_acc = f"{convergence.get('improvement_percent', 0):.1f}%"
+            final_acc = f"{eval_data.get('final_global_accuracy', 0.0):.1f}%"
             privacy_enabled = (
                 "Yes" if privacy.get("differential_privacy_enabled", False) else "No"
             )
@@ -197,11 +202,8 @@ class ComprehensiveEvaluator:
                 if isinstance(fairness, dict) and "fairness_score" in fairness
                 else "N/A"
             )
-            converged = (
-                "Yes" if convergence.get("converged", False) else "No"
-            )
 
             print(
                 f"{exp_name:<25} {final_acc:<12} {privacy_enabled:<10} "
-                f"{fairness_score:<10} {converged:<10}"
+                f"{fairness_score:<10}"
             )

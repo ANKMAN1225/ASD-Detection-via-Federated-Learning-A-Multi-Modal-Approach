@@ -56,21 +56,44 @@ def _ensure_save_dir():
     os.makedirs(SAVE_DIR, exist_ok=True)
 
 
+def _set_comm_round_ticks(ax: plt.Axes, rounds: List[int], max_ticks: int = 12) -> None:
+    """Thin x-axis ticks for communication rounds charts.
+
+    With large `num_rounds` (e.g., 100), labeling every round makes the plot unreadable.
+    """
+    rounds = list(rounds)
+    if not rounds:
+        return
+
+    if len(rounds) <= max_ticks:
+        ax.set_xticks(rounds)
+        return
+
+    stride = int(np.ceil(len(rounds) / max_ticks))
+    ticks = rounds[::stride]
+    if ticks[-1] != rounds[-1]:
+        ticks.append(rounds[-1])
+
+    ax.set_xticks(ticks)
+
+
 # Module-level data (populated by _extract_data)
 iid_data = iid_rounds_data = iid_final = None
 iid_rounds = iid_loss = iid_clients = iid_preds = iid_targets = []
 iid_metrics = {}
+iid_eval_acc_log: list = []
 dp_data = dp_rounds_data = dp_final = None
 dp_rounds = dp_loss = dp_clients = dp_preds = dp_targets = []
 dp_metrics = {}
+dp_eval_acc_log: list = []
 
 
 def _extract_data(results: Dict[str, Any]) -> bool:
     """Extract IID and DP data from results. Returns True if both exist."""
     global iid_data, iid_rounds_data, iid_final, iid_rounds, iid_loss
-    global iid_clients, iid_preds, iid_targets, iid_metrics
+    global iid_clients, iid_preds, iid_targets, iid_metrics, iid_eval_acc_log
     global dp_data, dp_rounds_data, dp_final, dp_rounds, dp_loss
-    global dp_clients, dp_preds, dp_targets, dp_metrics
+    global dp_clients, dp_preds, dp_targets, dp_metrics, dp_eval_acc_log
 
     exp = results.get("experimental_results", {})
     if "IID_Distribution" not in exp or "With_Differential_Privacy" not in exp:
@@ -81,6 +104,10 @@ def _extract_data(results: Dict[str, Any]) -> bool:
         return False
     iid_rounds_data = iid_data["facial_experiment"]["round_metrics"]
     iid_final = iid_data["facial_experiment"]["final_metrics"]
+    iid_eval_acc_log = iid_data["facial_experiment"].get(
+        "eval_accuracy_log",
+        iid_data["facial_experiment"].get("val_accuracy_log", []),
+    )
     iid_rounds = list(range(1, len(iid_rounds_data) + 1))
     iid_loss = [r["avg_loss"] for r in iid_rounds_data]
     iid_clients = iid_final["client_metrics"]
@@ -93,6 +120,10 @@ def _extract_data(results: Dict[str, Any]) -> bool:
         return False
     dp_rounds_data = dp_data["facial_experiment"]["round_metrics"]
     dp_final = dp_data["facial_experiment"]["final_metrics"]
+    dp_eval_acc_log = dp_data["facial_experiment"].get(
+        "eval_accuracy_log",
+        dp_data["facial_experiment"].get("val_accuracy_log", []),
+    )
     dp_rounds = list(range(1, len(dp_rounds_data) + 1))
     dp_loss = [r["avg_loss"] for r in dp_rounds_data]
     dp_clients = dp_final["client_metrics"]
@@ -128,12 +159,12 @@ def _fig1_loss():
     ax.set_xlabel("Communication Round")
     ax.set_ylabel("Average Training Loss")
     ax.set_title("Figure 1: Federated Training Loss per Round")
-    ax.set_xticks(iid_rounds)
+    _set_comm_round_ticks(ax, iid_rounds, max_ticks=12)
     ax.legend()
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig1_loss.png"))
     plt.close()
-    print("✓ Fig 1 saved")
+    print("Fig 1 saved")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -141,44 +172,55 @@ def _fig1_loss():
 # ══════════════════════════════════════════════════════════════════
 
 def _fig2_accuracy(results):
-    iid_acc_final = iid_final["global_accuracy"]
-    dp_acc_final = dp_final["global_accuracy"]
+    """Plot real per-round global accuracy from logged evaluation data."""
+    if not iid_eval_acc_log or not dp_eval_acc_log:
+        print(
+            "WARNING: Figure 2 skipped because eval_accuracy_log is missing. "
+            "Re-run experiments to generate per-round accuracy logs."
+        )
+        return
 
-    def extract_acc(rounds_data, final_acc):
-        if rounds_data and "accuracy" in rounds_data[0]:
-            return [r["accuracy"] for r in rounds_data]
-        n = len(rounds_data)
-        curve = [final_acc * (1 - np.exp(-0.4 * (i + 1))) / (1 - np.exp(-0.4 * n))
-                 for i in range(n)]
-        return curve
-
-    iid_acc = extract_acc(iid_rounds_data, iid_acc_final)
-    dp_acc = extract_acc(dp_rounds_data, dp_acc_final)
+    iid_r = [entry["round"] for entry in iid_eval_acc_log]
+    iid_acc = [entry["accuracy"] for entry in iid_eval_acc_log]
+    dp_r = [entry["round"] for entry in dp_eval_acc_log]
+    dp_acc = [entry["accuracy"] for entry in dp_eval_acc_log]
 
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.set_facecolor(BG)
 
-    ax.plot(iid_rounds, iid_acc, color=IID_COLOR, lw=2.2, marker="o",
-            markersize=5, label="Exp 1 — IID")
-    ax.plot(dp_rounds, dp_acc, color=DP_COLOR, lw=2.2, marker="s",
-            markersize=5, linestyle="--", label="Exp 3 — DP")
+    ax.plot(iid_r, iid_acc, color=IID_COLOR, lw=2.2, marker="o",
+            markersize=5, label="Exp 1 — IID Distribution")
+    ax.plot(dp_r, dp_acc, color=DP_COLOR, lw=2.2, marker="s",
+            markersize=5, linestyle="--", label="Exp 3 — Differential Privacy")
 
-    ax.annotate(f"{iid_acc[-1]:.2f}%", xy=(iid_rounds[-1], iid_acc[-1]),
-                xytext=(-25, 8), textcoords="offset points",
+    # Annotate final accuracy value
+    ax.annotate(f"{iid_acc[-1]:.1f}%", xy=(iid_r[-1], iid_acc[-1]),
+                xytext=(-30, 8), textcoords="offset points",
                 fontsize=9, color=IID_COLOR, fontweight="bold")
-    ax.annotate(f"{dp_acc[-1]:.2f}%", xy=(dp_rounds[-1], dp_acc[-1]),
-                xytext=(-25, -15), textcoords="offset points",
+    ax.annotate(f"{dp_acc[-1]:.1f}%", xy=(dp_r[-1], dp_acc[-1]),
+                xytext=(-30, -15), textcoords="offset points",
                 fontsize=9, color=DP_COLOR, fontweight="bold")
+
+    # Mark the peak accuracy point for each experiment
+    iid_peak_idx = int(np.argmax(iid_acc))
+    dp_peak_idx = int(np.argmax(dp_acc))
+    ax.scatter([iid_r[iid_peak_idx]], [iid_acc[iid_peak_idx]],
+               color=IID_COLOR, s=80, zorder=5,
+               label=f"IID Best: {iid_acc[iid_peak_idx]:.1f}% @ round {iid_r[iid_peak_idx]}")
+    ax.scatter([dp_r[dp_peak_idx]], [dp_acc[dp_peak_idx]],
+               color=DP_COLOR, s=80, zorder=5, marker="^",
+               label=f"DP Best: {dp_acc[dp_peak_idx]:.1f}% @ round {dp_r[dp_peak_idx]}")
 
     ax.set_xlabel("Communication Round")
     ax.set_ylabel("Global Accuracy (%)")
     ax.set_title("Figure 2: Global Model Accuracy over Federated Rounds")
-    ax.set_xticks(iid_rounds)
-    ax.legend()
+    all_r = sorted(set(iid_r + dp_r))
+    _set_comm_round_ticks(ax, all_r, max_ticks=12)
+    ax.legend(fontsize=8)
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig2_accuracy.png"))
     plt.close()
-    print("✓ Fig 2 saved")
+    print("Fig 2 saved")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -212,7 +254,7 @@ def _fig3_per_client_iid():
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig3_per_client_iid.png"))
     plt.close()
-    print("✓ Fig 3 saved")
+    print("Fig 3 saved")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -245,7 +287,7 @@ def _fig4_per_client_dp():
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig4_per_client_dp.png"))
     plt.close()
-    print("✓ Fig 4 saved")
+    print("Fig 4 saved")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -289,7 +331,7 @@ def _fig5_confusion():
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig5_confusion.png"))
     plt.close()
-    print("✓ Fig 5 saved")
+    print("Fig 5 saved")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -327,7 +369,7 @@ def _fig6_radar():
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig6_radar.png"))
     plt.close()
-    print("✓ Fig 6 saved")
+    print("Fig 6 saved")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -368,7 +410,7 @@ def _fig7_metric_bar():
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig7_metric_bar.png"))
     plt.close()
-    print("✓ Fig 7 saved")
+    print("Fig 7 saved")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -399,7 +441,7 @@ def _fig8_sample_distribution():
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig8_sample_distribution.png"))
     plt.close()
-    print("✓ Fig 8 saved")
+    print("Fig 8 saved")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -409,14 +451,15 @@ def _fig8_sample_distribution():
 def _fig9_loss_delta():
     iid_delta = [abs(iid_loss[i] - iid_loss[i-1]) for i in range(1, len(iid_loss))]
     dp_delta = [abs(dp_loss[i] - dp_loss[i-1]) for i in range(1, len(dp_loss))]
-    rounds = list(range(2, len(iid_loss) + 1))
+    iid_rounds = list(range(2, len(iid_loss) + 1))
+    dp_rounds = list(range(2, len(dp_loss) + 1))
 
     fig, ax = plt.subplots(figsize=(8, 5))
     ax.set_facecolor(BG)
 
-    ax.plot(rounds, iid_delta, color=IID_COLOR, lw=2.2, marker="o",
+    ax.plot(iid_rounds, iid_delta, color=IID_COLOR, lw=2.2, marker="o",
             markersize=5, label="Exp 1 — IID")
-    ax.plot(rounds, dp_delta, color=DP_COLOR, lw=2.2, marker="s",
+    ax.plot(dp_rounds, dp_delta, color=DP_COLOR, lw=2.2, marker="s",
             markersize=5, linestyle="--", label="Exp 3 — DP")
     ax.axhline(0.01, color="gray", lw=1.2, linestyle=":",
                label="Convergence threshold (0.01)")
@@ -424,12 +467,13 @@ def _fig9_loss_delta():
     ax.set_xlabel("Communication Round")
     ax.set_ylabel("|Loss Change| from Previous Round")
     ax.set_title("Figure 9: Loss Convergence Rate per Round")
-    ax.set_xticks(rounds)
+    all_rounds = sorted(set(iid_rounds + dp_rounds))
+    _set_comm_round_ticks(ax, all_rounds, max_ticks=12)
     ax.legend()
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig9_convergence_rate.png"))
     plt.close()
-    print("✓ Fig 9 saved")
+    print("Fig 9 saved")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -474,7 +518,7 @@ def _fig10_fairness():
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig10_fairness.png"))
     plt.close()
-    print("✓ Fig 10 saved")
+    print("Fig 10 saved")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -522,7 +566,7 @@ def _fig11_grouped_metrics_pct():
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig11_grouped_metrics_pct.png"))
     plt.close()
-    print("✓ Fig 11 (grouped bar) saved")
+    print("Fig 11 (grouped bar) saved")
 
 
 def _fig12_auc_roc():
@@ -546,7 +590,7 @@ def _fig12_auc_roc():
                     label=f"{label} (AUC = {roc_auc:.3f})")
             ax.fill_between(fpr, tpr, alpha=0.15, color=color)
         except Exception as e:
-            print(f"  ⚠ AUC-ROC for {label} skipped: {e}")
+            print(f"  WARNING: AUC-ROC for {label} skipped: {e}")
 
     ax.plot([0, 1], [0, 1], "k--", lw=1.5, label="Random (AUC = 0.5)")
     ax.set_xlabel("False Positive Rate")
@@ -558,7 +602,7 @@ def _fig12_auc_roc():
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig12_auc_roc.png"))
     plt.close()
-    print("✓ Fig 12 (AUC-ROC) saved")
+    print("Fig 12 (AUC-ROC) saved")
 
 
 def _fig13_fairness_boxplot():
@@ -592,7 +636,7 @@ def _fig13_fairness_boxplot():
     fig.tight_layout()
     fig.savefig(os.path.join(SAVE_DIR, "fig13_fairness_boxplot.png"))
     plt.close()
-    print("✓ Fig 13 (fairness box plot) saved")
+    print("Fig 13 (fairness box plot) saved")
 
 
 def generate_research_visualizations(results: Dict[str, Any]) -> None:
@@ -604,7 +648,7 @@ def generate_research_visualizations(results: Dict[str, Any]) -> None:
     _ensure_save_dir()
 
     if not _extract_data(results):
-        print("⚠ Cannot generate research visualizations: need IID_Distribution "
+        print("WARNING: Cannot generate research visualizations: need IID_Distribution "
               "and With_Differential_Privacy in experimental_results.")
         return
 
@@ -635,7 +679,7 @@ def print_detailed_results(results: Dict[str, Any]) -> None:
     print("=" * 80)
 
     if "experimental_results" not in results or not results["experimental_results"]:
-        print("⚠️  No experimental results found!")
+        print("WARNING: No experimental results found!")
         return
 
     experimental_results = results["experimental_results"]
@@ -644,7 +688,7 @@ def print_detailed_results(results: Dict[str, Any]) -> None:
         if ("IID" in k or "Privacy" in k) and "Non" not in k
     }
 
-    print("\n📊 EXPERIMENT SUMMARY")
+    print("\nExperiment Summary")
     print("-" * 50)
     print(f"Total Experiments Conducted: {len(filtered_results)}")
     print(f"Successful: {len([r for r in filtered_results.values() if r is not None])}")
@@ -652,23 +696,30 @@ def print_detailed_results(results: Dict[str, Any]) -> None:
     for exp_name, exp_data in filtered_results.items():
         if exp_data is None:
             continue
-        print(f"\n🔬 EXPERIMENT: {exp_name}")
+        print(f"\nExperiment: {exp_name}")
         print("=" * (15 + len(exp_name)))
 
         config = exp_data.get("config", {})
-        print(f"\n📋 Configuration:")
-        print(f"   • Clients: {config.get('num_clients', 'N/A')}")
-        print(f"   • Rounds: {config.get('num_rounds', 'N/A')}")
-        print(f"   • Differential Privacy: {'✅ Enabled' if config.get('use_differential_privacy') else '❌ Disabled'}")
+        print(f"\nConfiguration:")
+        print(f"   - Clients: {config.get('num_clients', 'N/A')}")
+        print(f"   - Rounds: {config.get('num_rounds', 'N/A')}")
+        dp_str = "Enabled" if config.get("use_differential_privacy") else "Disabled"
+        print(f"   - Differential Privacy: {dp_str}")
 
         facial_exp = exp_data.get("facial_experiment", {})
         round_metrics = facial_exp.get("round_metrics", [])
         if round_metrics:
-            print(f"\n📈 Training: Initial Loss {round_metrics[0]['avg_loss']:.4f} → Final {round_metrics[-1]['avg_loss']:.4f}")
+            print(
+                "\nTraining: "
+                f"Initial Loss {round_metrics[0]['avg_loss']:.4f} -> "
+                f"Final {round_metrics[-1]['avg_loss']:.4f}"
+            )
 
         final_metrics = facial_exp.get("final_metrics", {})
         if final_metrics:
-            print(f"\n🎯 Final Global Accuracy: {final_metrics.get('global_accuracy', 0):.2f}%")
+            print(
+                f"\nFinal Global Accuracy: {final_metrics.get('global_accuracy', 0):.2f}%"
+            )
 
 
 def generate_research_summary(results: Dict[str, Any]) -> None:
@@ -691,7 +742,10 @@ def generate_research_summary(results: Dict[str, Any]) -> None:
                 all_acc.append(fm.get("global_accuracy", 0))
 
     if all_acc:
-        print(f"\n🎯 Mean accuracy across experiments: {np.mean(all_acc):.2f}% ± {np.std(all_acc):.2f}%")
+        print(
+            "\nMean accuracy across experiments: "
+            f"{np.mean(all_acc):.2f}% +/- {np.std(all_acc):.2f}%"
+        )
 
 
 def create_comparison_table(results: Dict[str, Any]) -> None:
@@ -729,7 +783,7 @@ def run_complete_analysis(
     save_graphs: bool = True,
 ) -> None:
     """Run complete analysis pipeline: print results, generate figures, summary, table."""
-    print("\n🚀 STARTING COMPREHENSIVE RESULTS ANALYSIS")
+    print("\nSTARTING COMPREHENSIVE RESULTS ANALYSIS")
     print("=" * 80)
 
     print_detailed_results(results)
@@ -737,4 +791,4 @@ def run_complete_analysis(
         generate_research_visualizations(results)
     generate_research_summary(results)
     create_comparison_table(results)
-    print("\n✅ Analysis complete!")
+    print("\nAnalysis complete!")
