@@ -25,18 +25,24 @@ class BehavioralVideoDataset(Dataset):
         self.sequence_length = sequence_length
         self.samples = []
 
-        # For SSBD dataset structure
-        self.classes = ["armflapping", "headbanging", "spinning"]
+        # For Binary Classification (Autistic vs Non-Autistic)
+        self.classes = ["autistic", "non_autistic"]
         self.class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
 
-        # Load video files
+        # Load video files from top-level class folders
         for cls in self.classes:
             class_path = os.path.join(video_dir, cls)
             if os.path.exists(class_path):
                 for video_file in os.listdir(class_path):
-                    if video_file.endswith(".mp4") or video_file.endswith(".avi"):
+                    if video_file.lower().endswith((".mp4", ".avi")):
                         video_path = os.path.join(class_path, video_file)
                         self.samples.append((video_path, self.class_to_idx[cls]))
+        
+        if len(self.samples) == 0:
+            print(f"DEBUG: Total videos found: {len(self.samples)} in {video_dir}")
+            # Check for sub-directories if empty
+            if os.path.exists(video_dir):
+                print(f"DEBUG: Contents of {video_dir}: {os.listdir(video_dir)}")
 
     def __len__(self) -> int:
         return len(self.samples)

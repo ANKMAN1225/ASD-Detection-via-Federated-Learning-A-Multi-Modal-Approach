@@ -102,8 +102,11 @@ def _extract_data(results: Dict[str, Any]) -> bool:
     iid_data = exp["IID_Distribution"]
     if "facial_experiment" not in iid_data:
         return False
-    iid_rounds_data = iid_data["facial_experiment"]["round_metrics"]
-    iid_final = iid_data["facial_experiment"]["final_metrics"]
+    iid_facial = iid_data.get("facial_experiment", {})
+    iid_rounds_data = iid_facial.get("round_metrics", [])
+    iid_final = iid_facial.get("final_metrics", None)
+    if not iid_rounds_data or not iid_final:
+        return False
     iid_eval_acc_log = iid_data["facial_experiment"].get(
         "eval_accuracy_log",
         iid_data["facial_experiment"].get("val_accuracy_log", []),
@@ -111,6 +114,8 @@ def _extract_data(results: Dict[str, Any]) -> bool:
     iid_rounds = list(range(1, len(iid_rounds_data) + 1))
     iid_loss = [r["avg_loss"] for r in iid_rounds_data]
     iid_clients = iid_final["client_metrics"]
+    if "predictions" not in iid_final or "targets" not in iid_final:
+        return False
     iid_preds = [int(p) for p in iid_final["predictions"]]
     iid_targets = [int(t) for t in iid_final["targets"]]
     iid_metrics = _get_metrics(iid_targets, iid_preds)
@@ -118,8 +123,11 @@ def _extract_data(results: Dict[str, Any]) -> bool:
     dp_data = exp["With_Differential_Privacy"]
     if "facial_experiment" not in dp_data:
         return False
-    dp_rounds_data = dp_data["facial_experiment"]["round_metrics"]
-    dp_final = dp_data["facial_experiment"]["final_metrics"]
+    dp_facial = dp_data.get("facial_experiment", {})
+    dp_rounds_data = dp_facial.get("round_metrics", [])
+    dp_final = dp_facial.get("final_metrics", None)
+    if not dp_rounds_data or not dp_final:
+        return False
     dp_eval_acc_log = dp_data["facial_experiment"].get(
         "eval_accuracy_log",
         dp_data["facial_experiment"].get("val_accuracy_log", []),
@@ -127,6 +135,8 @@ def _extract_data(results: Dict[str, Any]) -> bool:
     dp_rounds = list(range(1, len(dp_rounds_data) + 1))
     dp_loss = [r["avg_loss"] for r in dp_rounds_data]
     dp_clients = dp_final["client_metrics"]
+    if "predictions" not in dp_final or "targets" not in dp_final:
+        return False
     dp_preds = [int(p) for p in dp_final["predictions"]]
     dp_targets = [int(t) for t in dp_final["targets"]]
     dp_metrics = _get_metrics(dp_targets, dp_preds)

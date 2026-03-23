@@ -54,6 +54,14 @@ class Config:
     facial_train_rotation_degrees: float = 15.0
     facial_color_jitter_strength: float = 0.1
 
+    # Behavioral video workload caps (to keep `--skip-facial` runs safe)
+    behavioral_num_rounds: int = 1
+    behavioral_local_epochs: int = 1
+    behavioral_batch_size: int = 2
+    behavioral_eval_every_n_rounds: int = 1
+    # If <= 0, use all videos found in the dataset directory.
+    behavioral_max_videos: int = 20
+
     # Experiment name (set per experiment)
     experiment_name: str = "default"
 
@@ -101,6 +109,13 @@ def get_experiment_configs() -> List[dict]:
         "facial_train_augmentation": True,
         "facial_train_rotation_degrees": 15.0,
         "facial_color_jitter_strength": 0.1,
+
+        # Behavioral caps
+        "behavioral_num_rounds": 1,
+        "behavioral_local_epochs": 1,
+        "behavioral_batch_size": 2,
+        "behavioral_eval_every_n_rounds": 1,
+        "behavioral_max_videos": 20,
     }
 
     config_iid = {

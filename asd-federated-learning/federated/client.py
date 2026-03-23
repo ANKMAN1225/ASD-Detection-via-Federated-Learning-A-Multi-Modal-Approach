@@ -34,7 +34,7 @@ class FederatedClient:
         self.val_loader = val_loader
         self.device = device
 
-    def _compute_class_weights(self, num_classes: int = 2) -> Optional[torch.Tensor]:
+    def _compute_class_weights(self, num_classes: int) -> Optional[torch.Tensor]:
         """Compute inverse-frequency class weights from this client's training data.
 
         Reduces bias when the client's local dataset is class-imbalanced.
@@ -94,7 +94,18 @@ class FederatedClient:
         )
 
         # ── 3. Class-balanced loss ──────────────────────────────────────────
-        class_weights = self._compute_class_weights(num_classes=2)
+        # Infer num_classes from model's final layer
+        try:
+            if hasattr(self.model, "classifier") and isinstance(self.model.classifier[-1], nn.Linear):
+                num_classes = self.model.classifier[-1].out_features
+            elif hasattr(self.model, "fusion_classifier") and isinstance(self.model.fusion_classifier[-1], nn.Linear):
+                num_classes = self.model.fusion_classifier[-1].out_features
+            else:
+                num_classes = 2 # Default fallback
+        except:
+            num_classes = 2
+
+        class_weights = self._compute_class_weights(num_classes=num_classes)
         criterion = nn.CrossEntropyLoss(weight=class_weights)
 
         total_loss = 0.0

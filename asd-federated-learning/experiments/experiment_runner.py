@@ -120,11 +120,7 @@ class CompleteFederatedTrainer:
                 valid_facial.transform = eval_transform
                 test_facial.transform = eval_transform
 
-                print(
-                    "Loaded facial dataset: "
-                    f"{len(train_facial)} training, {len(valid_facial)} validation, "
-                    f"{len(test_facial)} testing samples"
-                )
+                print("loaded video dataset")
 
                 if (
                     len(train_facial) == 0
@@ -221,7 +217,7 @@ class CompleteFederatedTrainer:
     def run_facial_experiment(self) -> Dict:
         """Run federated learning experiment with facial data."""
         print("\n" + "=" * 50)
-        print("FACIAL DATA FEDERATED EXPERIMENT")
+        print("VIDEO DATA FEDERATED EXPERIMENT")
         print("=" * 50)
 
         train_loaders, val_loaders, test_loaders = self.prepare_datasets()
@@ -390,13 +386,25 @@ class CompleteFederatedTrainer:
         print("BEHAVIORAL VIDEO FEDERATED EXPERIMENT")
         print("=" * 50)
 
-        ssbd_path = self.config.get("video_dataset_path", r"D:\WORK\VScode\Capstone\SSBD-file")
+        ssbd_path = self.config.get(
+            "video_data_path", r"D:\WORK\VScode\Capstone\SSBD-file"
+        )
         print(f"Loading behavioral dataset from {ssbd_path}...")
         
         full_dataset = BehavioralVideoDataset(
             video_dir=ssbd_path,
-            sequence_length=self.config["sequence_length"]
+            sequence_length=self.config["sequence_length"],
         )
+
+        behavioral_max_videos = int(
+            self.config.get("behavioral_max_videos", 50)
+        )
+        if behavioral_max_videos > 0 and len(full_dataset) > behavioral_max_videos:
+            # Subset early to avoid spending time extracting frames for all videos.
+            indices = list(range(len(full_dataset)))
+            random.shuffle(indices)
+            selected = indices[:behavioral_max_videos]
+            full_dataset = torch.utils.data.Subset(full_dataset, selected)
         
         if len(full_dataset) == 0:
             print("WARNING: No videos found in SSBD-file! Falling back to dummy data.")
@@ -419,8 +427,8 @@ class CompleteFederatedTrainer:
             )
             
             # Non-IID or IID split among clients
-            iid = not self.config.get("non_iid", False)
-            dirichlet_alpha = self.config.get("dirichlet_alpha", 0.5)
+            iid = bool(self.config.get("iid", True))
+            dirichlet_alpha = float(self.config.get("alpha", 0.5))
             
             client_train_datasets = create_federated_data_splits(
                 train_dataset, self.config["num_clients"], iid=iid, alpha=dirichlet_alpha
@@ -429,24 +437,34 @@ class CompleteFederatedTrainer:
                 test_dataset, self.config["num_clients"], iid=iid, alpha=dirichlet_alpha
             )
             
+            behavioral_batch_size = int(
+                self.config.get("behavioral_batch_size", self.config["batch_size"])
+            )
             train_loaders = [
-                DataLoader(ds, batch_size=self.config["batch_size"], shuffle=True)
+                DataLoader(
+                    ds, batch_size=behavioral_batch_size, shuffle=True, num_workers=0
+                )
                 for ds in client_train_datasets
             ]
             test_loaders = [
-                DataLoader(ds, batch_size=self.config["batch_size"], shuffle=False)
+                DataLoader(
+                    ds,
+                    batch_size=behavioral_batch_size,
+                    shuffle=False,
+                    num_workers=0,
+                )
                 for ds in client_test_datasets
             ]
 
         global_model = VideoTCNModel(
-            num_classes=3,
+            num_classes=2,
             sequence_length=self.config["sequence_length"],
         )
 
         clients: List[FederatedClient] = []
         for i in range(self.config["num_clients"]):
             client_model = VideoTCNModel(
-                num_classes=3,
+                num_classes=2,
                 sequence_length=self.config["sequence_length"],
             )
             client = FederatedClient(
@@ -460,27 +478,42 @@ class CompleteFederatedTrainer:
 
         server = FederatedServer(global_model, clients)
 
-        num_rounds = self.config["num_rounds"]
+        num_rounds = int(
+            self.config.get("behavioral_num_rounds", self.config["num_rounds"])
+        )
         print(f"\nStarting behavioral federated training for {num_rounds} rounds...")
+
+        behavioral_local_epochs = int(
+            self.config.get("behavioral_local_epochs", self.config["local_epochs"])
+        )
+        behavioral_eval_every_n_rounds = int(
+            self.config.get(
+                "behavioral_eval_every_n_rounds", 1
+            )
+        )
 
         for round_num in range(num_rounds):
             print(f"\n--- Round {round_num + 1}/{num_rounds} ---")
 
             round_metrics = server.train_round(
-                local_epochs=self.config["local_epochs"],
+                local_epochs=behavioral_local_epochs,
                 lr=self.config["learning_rate"],
             )
 
             print(f"Round {round_num + 1} - Avg Loss: {round_metrics['avg_loss']:.4f}")
 
-            if (round_num + 1) % 2 == 0:
-                eval_metrics = server.evaluate_global_model()
+            if (round_num + 1) % behavioral_eval_every_n_rounds == 0:
+                eval_metrics = server.evaluate_global_model(
+                    include_predictions=False
+                )
                 print(
                     f"Round {round_num + 1} - Global Accuracy: "
                     f"{eval_metrics['global_accuracy']:.2f}%"
                 )
 
-        final_metrics = server.evaluate_global_model()
+        final_metrics = server.evaluate_global_model(
+            include_predictions=False
+        )
         print(
             f"\nFinal Behavioral Model Accuracy: "
             f"{final_metrics['global_accuracy']:.2f}%"
@@ -503,10 +536,14 @@ class CompleteFederatedTrainer:
         dummy_labels = torch.randint(0, 3, (num_samples,))
 
         dataset = TensorDataset(dummy_videos, dummy_labels)
+        behavioral_batch_size = int(
+            self.config.get("behavioral_batch_size", self.config["batch_size"])
+        )
         return DataLoader(
             dataset,
-            batch_size=self.config["batch_size"],
+            batch_size=behavioral_batch_size,
             shuffle=is_train,
+            num_workers=0,
         )
 
     def run_fusion_experiment(self) -> Dict:
@@ -557,7 +594,7 @@ def save_results(results: Dict[str, Any]) -> None:
     print(f"Results saved to {SAVED_RESULTS_PATH}")
 
 
-def run_experiments(skip_training_if_saved: bool = False) -> Dict:
+def run_experiments(skip_training_if_saved: bool = False, skip_facial: bool = False) -> Dict:
     """Run all configured experiments and return results.
 
     Args:
@@ -591,7 +628,18 @@ def run_experiments(skip_training_if_saved: bool = False) -> Dict:
         try:
             trainer = CompleteFederatedTrainer(config)
             print(f"Running {experiment_name} experiment...")
-            facial_results = trainer.run_facial_experiment()
+            
+            if skip_facial:
+                print("Skipping facial experiment by request...")
+                facial_results = {
+                    "status": "skipped", 
+                    "global_accuracy": 0.0, 
+                    "round_metrics": [],
+                    "config": config
+                }
+            else:
+                facial_results = trainer.run_facial_experiment()
+                
             print(f"Running behavioral (video) experiment...")
             behavioral_results = trainer.run_behavioral_experiment()
 

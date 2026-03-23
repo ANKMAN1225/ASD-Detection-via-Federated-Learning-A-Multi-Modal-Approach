@@ -2,8 +2,4 @@ venv/
 __pycache__/
 *.pyc
 .env
-SSBD-file/armflapping/
-SSBD-file/headbanging/
-SSBD-file/spinning/
-SSBD-file/temp_downloads/
-SSBD-file/ssbd2/
+SSBD-file/

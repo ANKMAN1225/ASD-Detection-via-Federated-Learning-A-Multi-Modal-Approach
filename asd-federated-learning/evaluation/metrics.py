@@ -73,8 +73,13 @@ class ComprehensiveEvaluator:
         if "facial_experiment" not in results:
             return {"status": "no_data"}
 
-        round_metrics = results["facial_experiment"]["round_metrics"]
+        facial_experiment = results.get("facial_experiment", {})
+        round_metrics = facial_experiment.get("round_metrics", [])
+        if not round_metrics:
+            return {"status": "no_data"}
         losses = [m["avg_loss"] for m in round_metrics]
+        if not losses:
+            return {"status": "no_data"}
 
         # Calculate convergence metrics
         initial_loss = losses[0]
@@ -99,7 +104,7 @@ class ComprehensiveEvaluator:
 
     def analyze_privacy(self, results: Dict) -> Dict:
         """Analyze privacy preservation."""
-        config = results.get("facial_experiment", {}).get("config", {})
+        config = results.get("facial_experiment", {}).get("config", {}) or {}
 
         privacy_analysis = {
             "differential_privacy_enabled": config.get("use_differential_privacy", False),
@@ -152,7 +157,10 @@ class ComprehensiveEvaluator:
         if "facial_experiment" not in results:
             return {"status": "no_data"}
 
-        final_metrics = results["facial_experiment"]["final_metrics"]
+        facial_experiment = results.get("facial_experiment", {}) or {}
+        final_metrics = facial_experiment.get("final_metrics", None)
+        if not final_metrics:
+            return {"status": "no_data"}
         client_metrics = final_metrics.get("client_metrics", [])
 
         if not client_metrics:
