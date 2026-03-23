@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import torchvision.transforms as transforms
 
 from config import get_experiment_configs
-from data import FacialDataset
+from data import FacialDataset, BehavioralVideoDataset
 from federated import FederatedClient, FederatedServer, create_federated_data_splits
 from federated.privacy import DifferentialPrivacy
 from models import MobileNetFeatureExtractor, VideoTCNModel, FusedModel
@@ -390,14 +390,53 @@ class CompleteFederatedTrainer:
         print("BEHAVIORAL VIDEO FEDERATED EXPERIMENT")
         print("=" * 50)
 
-        train_loaders: List[DataLoader] = []
-        test_loaders: List[DataLoader] = []
-
-        for i in range(self.config["num_clients"]):
-            train_loader = self._create_dummy_video_loader(is_train=True)
-            test_loader = self._create_dummy_video_loader(is_train=False)
-            train_loaders.append(train_loader)
-            test_loaders.append(test_loader)
+        ssbd_path = self.config.get("video_dataset_path", r"D:\WORK\VScode\Capstone\SSBD-file")
+        print(f"Loading behavioral dataset from {ssbd_path}...")
+        
+        full_dataset = BehavioralVideoDataset(
+            video_dir=ssbd_path,
+            sequence_length=self.config["sequence_length"]
+        )
+        
+        if len(full_dataset) == 0:
+            print("WARNING: No videos found in SSBD-file! Falling back to dummy data.")
+            train_loaders: List[DataLoader] = []
+            test_loaders: List[DataLoader] = []
+            for i in range(self.config["num_clients"]):
+                train_loader = self._create_dummy_video_loader(is_train=True)
+                test_loader = self._create_dummy_video_loader(is_train=False)
+                train_loaders.append(train_loader)
+                test_loaders.append(test_loader)
+        else:
+            print(f"Loaded {len(full_dataset)} total videos.")
+            
+            # 80/20 train/test split globally
+            train_size = int(0.8 * len(full_dataset))
+            test_size = len(full_dataset) - train_size
+            generator = torch.Generator().manual_seed(42)
+            train_dataset, test_dataset = torch.utils.data.random_split(
+                full_dataset, [train_size, test_size], generator=generator
+            )
+            
+            # Non-IID or IID split among clients
+            iid = not self.config.get("non_iid", False)
+            dirichlet_alpha = self.config.get("dirichlet_alpha", 0.5)
+            
+            client_train_datasets = create_federated_data_splits(
+                train_dataset, self.config["num_clients"], iid=iid, alpha=dirichlet_alpha
+            )
+            client_test_datasets = create_federated_data_splits(
+                test_dataset, self.config["num_clients"], iid=iid, alpha=dirichlet_alpha
+            )
+            
+            train_loaders = [
+                DataLoader(ds, batch_size=self.config["batch_size"], shuffle=True)
+                for ds in client_train_datasets
+            ]
+            test_loaders = [
+                DataLoader(ds, batch_size=self.config["batch_size"], shuffle=False)
+                for ds in client_test_datasets
+            ]
 
         global_model = VideoTCNModel(
             num_classes=3,
@@ -553,9 +592,12 @@ def run_experiments(skip_training_if_saved: bool = False) -> Dict:
             trainer = CompleteFederatedTrainer(config)
             print(f"Running {experiment_name} experiment...")
             facial_results = trainer.run_facial_experiment()
+            print(f"Running behavioral (video) experiment...")
+            behavioral_results = trainer.run_behavioral_experiment()
 
             experiment_results = {
                 "facial_experiment": facial_results,
+                "behavioral_experiment": behavioral_results,
                 "config": config,
             }
             all_experimental_results[experiment_name] = experiment_results
