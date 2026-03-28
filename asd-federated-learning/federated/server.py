@@ -42,8 +42,16 @@ class FederatedServer:
 
         return averaged_params
 
-    def train_round(self, local_epochs: int = 1, lr: float = 0.001) -> Dict:
-        """Execute one round of federated training."""
+    def train_round(self, local_epochs: int = 1, lr: float = 0.001, dp=None) -> Dict:
+        """Execute one round of federated training.
+
+        Args:
+            local_epochs: Number of local training epochs per client.
+            lr: Learning rate for local optimizers.
+            dp: Optional DifferentialPrivacy instance. When provided, each
+                client applies gradient clipping + Gaussian noise after
+                loss.backward() on every local step.
+        """
         print("Starting training round...")
 
         # Distribute full global state_dict to all clients (includes BN buffers)
@@ -62,7 +70,7 @@ class FederatedServer:
 
         for client in self.clients:
             print(f"Training client {client.client_id}...")
-            metrics = client.local_train(epochs=local_epochs, lr=lr)
+            metrics = client.local_train(epochs=local_epochs, lr=lr, dp=dp)
             client_params.append(client.get_model_params())
             client_weights.append(metrics["samples"])
             client_metrics.append(metrics)

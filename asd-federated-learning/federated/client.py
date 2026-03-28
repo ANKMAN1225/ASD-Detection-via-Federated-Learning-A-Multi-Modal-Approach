@@ -56,7 +56,7 @@ class FederatedClient:
         except Exception:
             return None
 
-    def local_train(self, epochs: int = 1, lr: float = 0.001) -> Dict:
+    def local_train(self, epochs: int = 1, lr: float = 0.001, dp=None) -> Dict:
         """Train model locally and return metrics.
 
         Improvements vs. naive implementation:
@@ -66,6 +66,8 @@ class FederatedClient:
           session, improving convergence stability.
         - Class-weighted CrossEntropyLoss: corrects for per-client class
           imbalance without adding hyperparameters.
+        - Optional dp (DifferentialPrivacy): clips + noises gradients after
+          loss.backward() to provide differential privacy guarantees.
         """
         self.model.train()
 
@@ -113,6 +115,11 @@ class FederatedClient:
 
                 loss = criterion(output, target)
                 loss.backward()
+
+                # ── 4. Apply DP noise to gradients if requested ─────────────
+                if dp is not None:
+                    dp.add_noise_to_gradients(self.model)
+
                 optimizer.step()
 
                 total_loss += loss.item() * data.size(0)

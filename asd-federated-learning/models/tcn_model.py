@@ -8,7 +8,7 @@ from typing import List
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.models import mobilenet_v2
+from torchvision.models import mobilenet_v2, MobileNet_V2_Weights
 
 
 class Chomp1d(nn.Module):
@@ -134,13 +134,20 @@ class VideoTCNModel(nn.Module):
         sequence_length: int = 16,
         tcn_channels: List[int] = None,
         pretrained: bool = True,
+        freeze_backbone: bool = True,
     ) -> None:
         super().__init__()
         if tcn_channels is None:
             tcn_channels = [64, 128, 256]
 
-        # Feature extractor for individual frames
-        self.frame_extractor = mobilenet_v2(pretrained=pretrained).features
+        # Feature extractor for individual frames (uses new weights API — no deprecation warning)
+        _weights = MobileNet_V2_Weights.DEFAULT if pretrained else None
+        self.frame_extractor = mobilenet_v2(weights=_weights).features
+        
+        if freeze_backbone:
+            for param in self.frame_extractor.parameters():
+                param.requires_grad = False
+                
         self.frame_avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
         # TCN for temporal modeling

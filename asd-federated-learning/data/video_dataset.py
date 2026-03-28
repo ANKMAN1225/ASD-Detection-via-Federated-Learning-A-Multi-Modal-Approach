@@ -25,17 +25,30 @@ class BehavioralVideoDataset(Dataset):
         self.sequence_length = sequence_length
         self.samples = []
 
-        # For SSBD dataset structure
-        self.classes = ["armflapping", "headbanging", "spinning"]
+        # For SSBD dataset structure — class names must match folder names exactly (camelCase)
+        self.classes = ["armFlapping", "headBanging", "spinning"]
         self.class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
 
-        # Load video files
+        # Load video files — the Kaggle SSBD layout has a nested subfolder per class:
+        #   ssbd2/armFlapping/armFlapping/*.mp4
+        #   ssbd2/headBanging/headBanging/*.mp4
+        #   ssbd2/spinning/spinning/*.mp4
+        # We walk both the class root and any immediate subdirectory so the loader
+        # is robust regardless of whether videos land directly or one level deeper.
         for cls in self.classes:
             class_path = os.path.join(video_dir, cls)
-            if os.path.exists(class_path):
-                for video_file in os.listdir(class_path):
-                    if video_file.endswith(".mp4") or video_file.endswith(".avi"):
-                        video_path = os.path.join(class_path, video_file)
+            if not os.path.exists(class_path):
+                continue
+            # Gather all .mp4 / .avi files at the class root AND one level below
+            search_dirs = [class_path]
+            for entry in os.listdir(class_path):
+                sub = os.path.join(class_path, entry)
+                if os.path.isdir(sub):
+                    search_dirs.append(sub)
+            for search_dir in search_dirs:
+                for video_file in os.listdir(search_dir):
+                    if video_file.lower().endswith((".mp4", ".avi")):
+                        video_path = os.path.join(search_dir, video_file)
                         self.samples.append((video_path, self.class_to_idx[cls]))
 
     def __len__(self) -> int:
@@ -69,7 +82,12 @@ class BehavioralVideoDataset(Dataset):
             last_frame = frames[-1] if frames else np.zeros((224, 224, 3))
             frames.extend([last_frame] * (self.sequence_length - len(frames)))
 
-        frames = np.array(frames)  # (T, H, W, C)
-        frames = torch.from_numpy(frames).float().permute(0, 3, 1, 2) / 255.0  # (T, C, H, W)
+        frames_np = np.array(frames)  # (T, H, W, C)
+        frames_t = torch.from_numpy(frames_np).float().permute(0, 3, 1, 2) / 255.0  # (T, C, H, W)
 
-        return frames
+        # Normalize each channel with ImageNet mean/std (same as facial pipeline)
+        mean = torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 3, 1, 1)
+        std  = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(1, 3, 1, 1)
+        frames_t = (frames_t - mean) / std  # (T, C, H, W)
+
+        return frames_t

@@ -99,37 +99,45 @@ def _extract_data(results: Dict[str, Any]) -> bool:
     if "IID_Distribution" not in exp or "With_Differential_Privacy" not in exp:
         return False
 
-    iid_data = exp["IID_Distribution"]
-    if "facial_experiment" not in iid_data:
-        return False
-    iid_rounds_data = iid_data["facial_experiment"]["round_metrics"]
-    iid_final = iid_data["facial_experiment"]["final_metrics"]
-    iid_eval_acc_log = iid_data["facial_experiment"].get(
-        "eval_accuracy_log",
-        iid_data["facial_experiment"].get("val_accuracy_log", []),
-    )
-    iid_rounds = list(range(1, len(iid_rounds_data) + 1))
-    iid_loss = [r["avg_loss"] for r in iid_rounds_data]
-    iid_clients = iid_final["client_metrics"]
-    iid_preds = [int(p) for p in iid_final["predictions"]]
-    iid_targets = [int(t) for t in iid_final["targets"]]
-    iid_metrics = _get_metrics(iid_targets, iid_preds)
+    def _get_exp_details(data):
+        # Prefer facial, fallback to behavioral
+        if "facial_experiment" in data:
+            key = "facial_experiment"
+        elif "behavioral_experiment" in data:
+            key = "behavioral_experiment"
+        else:
+            return None
+        
+        rounds_data = data[key].get("round_metrics", [])
+        final = data[key].get("final_metrics", {})
+        eval_acc_log = data[key].get("eval_accuracy_log", data[key].get("val_accuracy_log", []))
+        
+        # If history is missing, try to use final metrics as a single round point
+        if not rounds_data and final:
+            rounds_data = [{"avg_loss": 0.0, "round": 1}] # dummy loss
+        
+        rounds = list(range(1, len(rounds_data) + 1))
+        loss = [r.get("avg_loss", 0.0) for r in rounds_data]
+        clients = final.get("client_metrics", [])
+        
+        # Safely extract predictions and targets
+        def _to_int(x):
+            if hasattr(x, "item"): return int(x.item())
+            return int(x)
+            
+        preds = [_to_int(p) for p in final.get("predictions", [])]
+        targets = [_to_int(t) for t in final.get("targets", [])]
+        metrics = _get_metrics(targets, preds) if targets else {}
+        
+        return rounds_data, final, eval_acc_log, rounds, loss, clients, preds, targets, metrics
 
-    dp_data = exp["With_Differential_Privacy"]
-    if "facial_experiment" not in dp_data:
-        return False
-    dp_rounds_data = dp_data["facial_experiment"]["round_metrics"]
-    dp_final = dp_data["facial_experiment"]["final_metrics"]
-    dp_eval_acc_log = dp_data["facial_experiment"].get(
-        "eval_accuracy_log",
-        dp_data["facial_experiment"].get("val_accuracy_log", []),
-    )
-    dp_rounds = list(range(1, len(dp_rounds_data) + 1))
-    dp_loss = [r["avg_loss"] for r in dp_rounds_data]
-    dp_clients = dp_final["client_metrics"]
-    dp_preds = [int(p) for p in dp_final["predictions"]]
-    dp_targets = [int(t) for t in dp_final["targets"]]
-    dp_metrics = _get_metrics(dp_targets, dp_preds)
+    iid_iid = _get_exp_details(exp["IID_Distribution"])
+    if not iid_iid: return False
+    iid_rounds_data, iid_final, iid_eval_acc_log, iid_rounds, iid_loss, iid_clients, iid_preds, iid_targets, iid_metrics = iid_iid
+
+    dp_dp = _get_exp_details(exp["With_Differential_Privacy"])
+    if not dp_dp: return False
+    dp_rounds_data, dp_final, dp_eval_acc_log, dp_rounds, dp_loss, dp_clients, dp_preds, dp_targets, dp_metrics = dp_dp
 
     return True
 
@@ -616,7 +624,11 @@ def _fig13_fairness_boxplot():
     data = [iid_accs, dp_accs]
     labels = ["IID Baseline", "DP-Enabled"]
     colors = [IID_COLOR, DP_COLOR]
-    bp = ax.boxplot(data, labels=labels, patch_artist=True, showmeans=True)
+    # Use tick_labels (Matplotlib 3.9+) or labels (legacy)
+    try:
+        bp = ax.boxplot(data, tick_labels=labels, patch_artist=True, showmeans=True)
+    except TypeError:
+        bp = ax.boxplot(data, labels=labels, patch_artist=True, showmeans=True)
 
     for patch, color in zip(bp["boxes"], colors):
         patch.set_facecolor(color)
