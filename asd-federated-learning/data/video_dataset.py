@@ -1,19 +1,27 @@
 """
-BehavioralVideoDataset - PyTorch Dataset for loading and extracting frames from videos.
-Designed for SSBD (Self-Stimulatory Behaviour Dataset) with armflapping, headbanging, spinning classes.
+BehavioralVideoDataset - PyTorch Dataset for Augmented SSBD (ssbd2).
+
+Supports nested Kaggle layout:
+    ssbd2/armFlapping/armFlapping/*.mp4
+    ssbd2/headBanging/headBanging/*.mp4
+    ssbd2/spinning/spinning/*.mp4
+
+Labels: 0=armFlapping, 1=headBanging, 2=spinning
 """
 
 import os
-from typing import Optional
+from typing import List, Optional, Tuple
 
+import cv2
 import numpy as np
 import torch
-import cv2
 from torch.utils.data import Dataset
 
 
 class BehavioralVideoDataset(Dataset):
-    """Dataset for behavioral videos (SSBD-style)."""
+    """Dataset for behavioral stereotypy videos (Augmented SSBD / ssbd2)."""
+
+    CLASSES = ["armFlapping", "headBanging", "spinning"]
 
     def __init__(
         self,
@@ -23,26 +31,42 @@ class BehavioralVideoDataset(Dataset):
     ) -> None:
         self.video_dir = video_dir
         self.sequence_length = sequence_length
-        self.samples = []
+        self.class_to_idx = {cls: idx for idx, cls in enumerate(self.CLASSES)}
+        self.samples: List[Tuple[str, int]] = []
 
-        # For Binary Classification (Autistic vs Non-Autistic)
-        self.classes = ["autistic", "non_autistic"]
-        self.class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
+        for cls in self.CLASSES:
+            candidate_paths = [
+                os.path.join(video_dir, cls, cls),
+                os.path.join(video_dir, cls),
+            ]
+            cls_dir = None
+            for path in candidate_paths:
+                if os.path.isdir(path):
+                    cls_dir = path
+                    break
 
-        # Load video files from top-level class folders
-        for cls in self.classes:
-            class_path = os.path.join(video_dir, cls)
-            if os.path.exists(class_path):
-                for video_file in os.listdir(class_path):
-                    if video_file.lower().endswith((".mp4", ".avi")):
-                        video_path = os.path.join(class_path, video_file)
-                        self.samples.append((video_path, self.class_to_idx[cls]))
-        
+            if cls_dir is None:
+                print(f"  [WARN] BehavioralVideoDataset: no folder for class '{cls}' under {video_dir}")
+                continue
+
+            for video_file in sorted(os.listdir(cls_dir)):
+                if video_file.lower().endswith((".mp4", ".avi", ".mov")):
+                    self.samples.append(
+                        (os.path.join(cls_dir, video_file), self.class_to_idx[cls])
+                    )
+
         if len(self.samples) == 0:
-            print(f"DEBUG: Total videos found: {len(self.samples)} in {video_dir}")
-            # Check for sub-directories if empty
+            print(f"WARNING: No behavioral videos found in {video_dir}")
             if os.path.exists(video_dir):
-                print(f"DEBUG: Contents of {video_dir}: {os.listdir(video_dir)}")
+                print(f"  Contents: {os.listdir(video_dir)}")
+        else:
+            counts = {cls: 0 for cls in self.CLASSES}
+            for _, label in self.samples:
+                counts[self.CLASSES[label]] += 1
+            print(
+                f"BehavioralVideoDataset: {len(self.samples)} videos "
+                f"({', '.join(f'{k}={v}' for k, v in counts.items())})"
+            )
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -53,29 +77,27 @@ class BehavioralVideoDataset(Dataset):
         return frames, torch.tensor(label, dtype=torch.long)
 
     def extract_frames(self, video_path: str) -> torch.Tensor:
-        """Extract frames from video and return as tensor."""
+        """Extract uniformly sampled frames from a video clip."""
         cap = cv2.VideoCapture(video_path)
-        frames = []
-
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if frame_count <= 0:
+            frame_count = 1
         indices = np.linspace(0, frame_count - 1, self.sequence_length, dtype=int)
 
+        frames = []
         for i in indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(i))
             ret, frame = cap.read()
             if ret:
                 frame = cv2.resize(frame, (224, 224))
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 frames.append(frame)
-
         cap.release()
 
-        if len(frames) < self.sequence_length:
-            # Pad with last frame if needed
-            last_frame = frames[-1] if frames else np.zeros((224, 224, 3))
-            frames.extend([last_frame] * (self.sequence_length - len(frames)))
+        if len(frames) == 0:
+            frames = [np.zeros((224, 224, 3), dtype=np.uint8)]
+        while len(frames) < self.sequence_length:
+            frames.append(frames[-1])
 
-        frames = np.array(frames)  # (T, H, W, C)
-        frames = torch.from_numpy(frames).float().permute(0, 3, 1, 2) / 255.0  # (T, C, H, W)
-
-        return frames
+        frames = np.array(frames, dtype=np.float32)
+        return torch.from_numpy(frames).permute(0, 3, 1, 2) / 255.0

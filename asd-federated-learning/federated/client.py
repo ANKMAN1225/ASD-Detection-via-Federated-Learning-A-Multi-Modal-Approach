@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 
 import torch.utils.data
 
@@ -34,6 +34,25 @@ class FederatedClient:
         self.val_loader = val_loader
         self.device = device
 
+    def _get_label_without_loading_sample(self, dataset: Dataset, idx: int) -> int:
+        """Read a label from common dataset wrappers without decoding image/video data."""
+        if isinstance(dataset, Subset):
+            return self._get_label_without_loading_sample(
+                dataset.dataset, int(dataset.indices[idx])
+            )
+
+        if hasattr(dataset, "facial_dataset"):
+            facial_dataset = dataset.facial_dataset
+            facial_idx = idx % len(facial_dataset)
+            return self._get_label_without_loading_sample(facial_dataset, facial_idx)
+
+        if hasattr(dataset, "samples"):
+            return int(dataset.samples[idx][1])
+
+        # Fallback for generic datasets. This may load data, so keep it as a last resort.
+        label = dataset[idx][1]
+        return int(label.item() if isinstance(label, torch.Tensor) else label)
+
     def _compute_class_weights(self, num_classes: int) -> Optional[torch.Tensor]:
         """Compute inverse-frequency class weights from this client's training data.
 
@@ -43,7 +62,10 @@ class FederatedClient:
         """
         try:
             dataset = self.train_loader.dataset
-            labels = [int(dataset[i][1]) for i in range(len(dataset))]
+            labels = [
+                self._get_label_without_loading_sample(dataset, i)
+                for i in range(len(dataset))
+            ]
             counts = Counter(labels)
             if len(counts) < 2:
                 return None  # Only one class — skip weighting
@@ -68,41 +90,56 @@ class FederatedClient:
           imbalance without adding hyperparameters.
         """
         self.model.train()
+        if hasattr(self.model, "fusion"):
+            self.model.facial_encoder.eval()
+            self.model.behavioral_encoder.eval()
 
-        # ── 1. Differential learning rate param groups ─────────────────────
-        backbone_params = [
-            p for name, p in self.model.named_parameters()
-            if "classifier" not in name and p.requires_grad
-        ]
-        classifier_params = [
-            p for name, p in self.model.named_parameters()
-            if "classifier" in name and p.requires_grad
-        ]
-
-        if backbone_params:
-            optimizer = torch.optim.Adam([
-                {"params": backbone_params, "lr": lr * 0.1},   # fine-tune slowly
-                {"params": classifier_params, "lr": lr},        # new head — normal LR
-            ])
+        if hasattr(self.model, "fusion"):
+            trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+            optimizer = torch.optim.Adam(trainable_params, lr=lr)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=max(epochs, 1), eta_min=lr * 0.01
+            )
         else:
-            # All params are in classifier (or backbone is fully frozen)
-            optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+            backbone_params = [
+                p for name, p in self.model.named_parameters()
+                if "classifier" not in name and "fusion_classifier" not in name and p.requires_grad
+            ]
+            classifier_params = [
+                p for name, p in self.model.named_parameters()
+                if ("classifier" in name or "fusion_classifier" in name) and p.requires_grad
+            ]
 
-        # ── 2. Cosine LR decay within local session ─────────────────────────
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=max(epochs, 1), eta_min=lr * 0.01
-        )
+            if backbone_params:
+                optimizer = torch.optim.Adam([
+                    {"params": backbone_params, "lr": lr * 0.1},
+                    {"params": classifier_params, "lr": lr},
+                ])
+            else:
+                optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
+
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=max(epochs, 1), eta_min=lr * 0.01
+            )
 
         # ── 3. Class-balanced loss ──────────────────────────────────────────
         # Infer num_classes from model's final layer
         try:
-            if hasattr(self.model, "classifier") and isinstance(self.model.classifier[-1], nn.Linear):
-                num_classes = self.model.classifier[-1].out_features
-            elif hasattr(self.model, "fusion_classifier") and isinstance(self.model.fusion_classifier[-1], nn.Linear):
+            if hasattr(self.model, "fusion") and hasattr(
+                self.model.fusion, "fusion_classifier"
+            ):
+                num_classes = self.model.fusion.fusion_classifier[-1].out_features
+            elif hasattr(self.model, "fusion_classifier") and isinstance(
+                self.model.fusion_classifier[-1], nn.Linear
+            ):
                 num_classes = self.model.fusion_classifier[-1].out_features
+            elif hasattr(self.model, "classifier") and isinstance(
+                self.model.classifier[-1], nn.Linear
+            ):
+                num_classes = self.model.classifier[-1].out_features
             else:
-                num_classes = 2 # Default fallback
-        except:
+                num_classes = 2
+        except Exception:
             num_classes = 2
 
         class_weights = self._compute_class_weights(num_classes=num_classes)
@@ -112,22 +149,35 @@ class FederatedClient:
         total_samples = 0
 
         for epoch in range(epochs):
-            for batch_idx, (data, target) in enumerate(self.train_loader):
-                data, target = data.to(self.device), target.to(self.device)
+            for batch_idx, batch in enumerate(self.train_loader):
+                data, target = batch
+                target = target.to(self.device)
 
                 optimizer.zero_grad()
 
-                if len(data.shape) == 5:  # Video data
-                    output, _ = self.model(data)
-                else:  # Image data
-                    output, _ = self.model(data)
+                if isinstance(data, (list, tuple)) and len(data) == 2:
+                    facial_x, behavioral_x = data
+                    facial_x = facial_x.to(self.device)
+                    behavioral_x = behavioral_x.to(self.device)
+                    output, _ = self.model(facial_x, behavioral_x)
+                else:
+                    data = data.to(self.device)
+                    if len(data.shape) == 5:
+                        output, _ = self.model(data)
+                    else:
+                        output, _ = self.model(data)
 
                 loss = criterion(output, target)
                 loss.backward()
+
+                # DP-SGD: Clip gradients and add noise before optimizer step
+                if hasattr(self, "dp_module") and self.dp_module is not None:
+                    self.dp_module.clip_and_add_noise(self.model)
+
                 optimizer.step()
 
-                total_loss += loss.item() * data.size(0)
-                total_samples += data.size(0)
+                total_loss += loss.item() * target.size(0)
+                total_samples += target.size(0)
 
             scheduler.step()
 
@@ -144,13 +194,21 @@ class FederatedClient:
         all_targets: List = []
 
         with torch.no_grad():
-            for data, target in loader:
-                data, target = data.to(self.device), target.to(self.device)
+            for batch in loader:
+                data, target = batch
+                target = target.to(self.device)
 
-                if len(data.shape) == 5:  # Video data
-                    output, _ = self.model(data)
-                else:  # Image data
-                    output, _ = self.model(data)
+                if isinstance(data, (list, tuple)) and len(data) == 2:
+                    facial_x, behavioral_x = data
+                    facial_x = facial_x.to(self.device)
+                    behavioral_x = behavioral_x.to(self.device)
+                    output, _ = self.model(facial_x, behavioral_x)
+                else:
+                    data = data.to(self.device)
+                    if len(data.shape) == 5:
+                        output, _ = self.model(data)
+                    else:
+                        output, _ = self.model(data)
 
                 test_loss += F.cross_entropy(output, target, reduction="sum").item()
                 pred = output.argmax(dim=1, keepdim=True)

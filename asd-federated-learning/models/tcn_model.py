@@ -9,7 +9,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models import mobilenet_v2, MobileNet_V2_Weights
-from torch.nn.utils import parametrizations
 
 
 
@@ -39,29 +38,25 @@ class TemporalBlock(nn.Module):
     ) -> None:
         super().__init__()
 
-        self.conv1 = parametrizations.weight_norm(
-            nn.Conv1d(
-                in_channels,
-                out_channels,
-                kernel_size,
-                stride=stride,
-                padding=padding,
-                dilation=dilation,
-            )
+        self.conv1 = nn.Conv1d(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
         )
         self.chomp1 = Chomp1d(padding)
         self.relu1 = nn.ReLU()
         self.dropout1 = nn.Dropout(dropout)
 
-        self.conv2 = parametrizations.weight_norm(
-            nn.Conv1d(
-                out_channels,
-                out_channels,
-                kernel_size,
-                stride=stride,
-                padding=padding,
-                dilation=dilation,
-            )
+        self.conv2 = nn.Conv1d(
+            out_channels,
+            out_channels,
+            kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
         )
         self.chomp2 = Chomp1d(padding)
         self.relu2 = nn.ReLU()
@@ -212,9 +207,14 @@ class FusedModel(nn.Module):
             fusion_dim = facial_feature_dim + behavioral_feature_dim
         elif fusion_type == "attention":
             fusion_dim = max(facial_feature_dim, behavioral_feature_dim)
-            self.attention = nn.MultiheadAttention(fusion_dim, num_heads=8)
+            self.facial_projection = nn.Linear(facial_feature_dim, fusion_dim)
+            self.behavioral_projection = nn.Linear(behavioral_feature_dim, fusion_dim)
+            self.attention = nn.MultiheadAttention(
+                fusion_dim, num_heads=8, batch_first=True
+            )
         else:  # average or weighted average
             fusion_dim = facial_feature_dim
+            self.behavioral_projection = nn.Linear(behavioral_feature_dim, fusion_dim)
 
         self.fusion_classifier = nn.Sequential(
             nn.Linear(fusion_dim, 512),
@@ -236,15 +236,19 @@ class FusedModel(nn.Module):
         if self.fusion_type == "concat":
             fused_features = torch.cat([facial_features, behavioral_features], dim=1)
         elif self.fusion_type == "attention":
+            facial_features = self.facial_projection(facial_features)
+            behavioral_features = self.behavioral_projection(behavioral_features)
             combined = torch.stack([facial_features, behavioral_features], dim=1)
             attended, _ = self.attention(combined, combined, combined)
             fused_features = attended.mean(dim=1)
         elif self.fusion_type == "weighted":
+            behavioral_features = self.behavioral_projection(behavioral_features)
             weights = F.softmax(
                 torch.stack([self.weight_facial, self.weight_behavioral]), dim=0
             )
             fused_features = weights[0] * facial_features + weights[1] * behavioral_features
         else:  # average
+            behavioral_features = self.behavioral_projection(behavioral_features)
             fused_features = (facial_features + behavioral_features) / 2
 
         return self.fusion_classifier(fused_features)

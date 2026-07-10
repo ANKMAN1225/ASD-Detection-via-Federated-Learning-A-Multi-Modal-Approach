@@ -11,6 +11,7 @@ from .tcn_model import (
     VideoTCNModel,
     FusedModel,
 )
+from .multimodal_model import MultiModalModel
 
 __all__ = [
     "MobileNetFeatureExtractor",
@@ -19,4 +20,5 @@ __all__ = [
     "TemporalConvNet",
     "VideoTCNModel",
     "FusedModel",
+    "MultiModalModel",
 ]

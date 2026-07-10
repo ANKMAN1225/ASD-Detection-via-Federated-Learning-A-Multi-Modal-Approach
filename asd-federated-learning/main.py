@@ -11,14 +11,40 @@ from inference.video_predict import run_video_prediction
 
 
 def main() -> dict:
-    """Run experiments and return results."""
     parser = argparse.ArgumentParser(description="ASD Federated Learning")
     parser.add_argument(
         "--skip-training",
         action="store_true",
         help="Load saved results from disk and skip training (use after first run)",
     )
-    
+    parser.add_argument(
+        "--skip-facial",
+        action="store_true",
+        help="Skip the facial experiment.",
+    )
+    parser.add_argument(
+        "--skip-fusion",
+        action="store_true",
+        help="Skip the multi-modal fusion experiment.",
+    )
+    parser.add_argument(
+        "--force-retrain",
+        action="store_true",
+        help="Retrain even if saved model checkpoints exist.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for a single experiment run.",
+    )
+    parser.add_argument(
+        "--experiment",
+        type=str,
+        choices=["all", "IID_Distribution", "With_Differential_Privacy"],
+        default="all",
+        help="Run one experiment config (useful when splitting local vs Kaggle).",
+    )
     parser.add_argument(
         "--predict",
         action="store_true",
@@ -54,16 +80,22 @@ def main() -> dict:
             stride=args.predict_stride,
             max_frames=args.predict_max_frames,
         )
-        # Return dict for programmatic use; not required by plots pipeline.
         return results  # type: ignore[return-value]
+
+    experiment_names = None
+    if args.experiment != "all":
+        experiment_names = [args.experiment]
 
     results = run_experiments(
         skip_training_if_saved=args.skip_training,
-        skip_facial=args.skip_facial
+        skip_facial=args.skip_facial,
+        skip_fusion=args.skip_fusion,
+        force_retrain=args.force_retrain,
+        experiment_names=experiment_names,
+        random_seed=args.seed,
     )
 
     run_complete_analysis(results, save_graphs=True)
-
     return results
 
 

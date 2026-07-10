@@ -20,7 +20,7 @@ def evaluate_metrics(
     """Calculate comprehensive evaluation metrics."""
     accuracy = accuracy_score(y_true, y_pred)
     precision, recall, f1, support = precision_recall_fscore_support(
-        y_true, y_pred, average="weighted"
+        y_true, y_pred, average="weighted", zero_division=0
     )
 
     metrics: Dict[str, Any] = {
@@ -28,7 +28,7 @@ def evaluate_metrics(
         "precision": precision,
         "recall": recall,
         "f1_score": f1,
-        "support": support.sum(),
+        "support": len(y_true) if support is None else support.sum(),
     }
 
     if y_prob is not None and len(np.unique(y_true)) == 2:
