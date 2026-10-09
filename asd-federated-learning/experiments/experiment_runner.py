@@ -847,11 +847,42 @@ def save_results(results: Dict[str, Any]) -> None:
     print(f"Results saved to {SAVED_RESULTS_PATH}")
 
 
+def _require_saved_model_checkpoints(
+    configs: List[Dict],
+    skip_facial: bool,
+    skip_fusion: bool,
+) -> None:
+    """Fail fast when evaluation-only mode is missing a required checkpoint.
+
+    This prevents an evaluation command from unexpectedly entering the training
+    path when a checkpoint has been deleted or renamed.
+    """
+    modalities = ["behavioral"]
+    if not skip_facial:
+        modalities.append("facial")
+    if not skip_fusion:
+        modalities.append("fusion")
+
+    missing = [
+        _model_path(config["experiment_name"], modality)
+        for config in configs
+        for modality in modalities
+        if not os.path.isfile(_model_path(config["experiment_name"], modality))
+    ]
+    if missing:
+        paths = "\n  - ".join(missing)
+        raise FileNotFoundError(
+            "Evaluation-only mode requires existing checkpoints. Missing:\n"
+            f"  - {paths}"
+        )
+
+
 def run_experiments(
     skip_training_if_saved: bool = False,
     skip_facial: bool = False,
     skip_fusion: bool = False,
     force_retrain: bool = False,
+    evaluate_saved_models_only: bool = False,
     experiment_names: Optional[List[str]] = None,
     random_seed: int = 42,
 ) -> Dict:
@@ -879,7 +910,16 @@ def run_experiments(
                 "Choose from: IID_Distribution, With_Differential_Privacy"
             )
         print(f"Running selected experiments: {[c['experiment_name'] for c in configs]}")
-    if force_retrain:
+    if force_retrain and evaluate_saved_models_only:
+        raise ValueError(
+            "--force-retrain and evaluation-only mode cannot be used together."
+        )
+    if evaluate_saved_models_only:
+        _require_saved_model_checkpoints(configs, skip_facial, skip_fusion)
+        for cfg in configs:
+            cfg["skip_saved_models"] = True
+        print("Evaluation-only mode: loading saved checkpoints; no training will run.")
+    elif force_retrain:
         for cfg in configs:
             cfg["skip_saved_models"] = False
 

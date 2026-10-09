@@ -82,11 +82,17 @@ class Config:
 
 
 FACIAL_DATA_PATHS = [
+    # Portable override for collaborators and CI.  Set ASD_FACIAL_DATA_PATH
+    # instead of editing this file when the dataset is stored elsewhere.
+    os.environ.get("ASD_FACIAL_DATA_PATH", ""),
     r"D:\WORK\VScode\Capstone\autistic-children-facial-data-set",
     "../autistic-children-facial-data-set",
 ]
 
 VIDEO_DATA_PATHS = [
+    # Portable override for collaborators and CI.  Set ASD_VIDEO_DATA_PATH
+    # to the directory that contains armFlapping/, headBanging/, and spinning/.
+    os.environ.get("ASD_VIDEO_DATA_PATH", ""),
     r"D:\WORK\VScode\Capstone\SSBD-file\ssbd2",
     r"C:\Users\ASUS\.cache\kagglehub\datasets\shradheypathak\ssbd3\versions\1\ssbd2",
     "../SSBD-file/ssbd2",
@@ -96,21 +102,24 @@ VIDEO_DATA_PATHS = [
 
 def _resolve_facial_data_path() -> str:
     for path in FACIAL_DATA_PATHS:
-        if os.path.exists(path):
+        if path and os.path.exists(path):
             return path
-    return FACIAL_DATA_PATHS[0]
+    # Keep the original project-relative fallback if no candidate exists yet;
+    # the dataset loader will then report the missing directory clearly.
+    return FACIAL_DATA_PATHS[2]
 
 
 def _resolve_video_data_path() -> str:
     for path in VIDEO_DATA_PATHS:
-        if not os.path.isdir(path):
+        if not path or not os.path.isdir(path):
             continue
         for cls in ["armFlapping", "headBanging", "spinning"]:
             if os.path.isdir(os.path.join(path, cls, cls)) or os.path.isdir(
                 os.path.join(path, cls)
             ):
                 return path
-    return VIDEO_DATA_PATHS[0]
+    # Keep the original project-relative fallback if no candidate exists yet.
+    return VIDEO_DATA_PATHS[3]
 
 
 def get_experiment_configs() -> List[dict]:

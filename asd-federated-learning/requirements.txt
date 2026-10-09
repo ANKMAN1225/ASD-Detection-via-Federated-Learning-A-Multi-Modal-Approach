@@ -1,0 +1,12 @@
+# Install a PyTorch/torchvision build appropriate for your CPU or CUDA version first.
+numpy
+torch
+torchvision
+opencv-python
+Pillow
+scikit-learn
+matplotlib
+seaborn
+tabulate
+scipy
+flwr

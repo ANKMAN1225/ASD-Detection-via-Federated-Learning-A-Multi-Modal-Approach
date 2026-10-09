@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 .env
 SSBD-file/
+going to be deleted/
+.vscode/
+wsl_venv/

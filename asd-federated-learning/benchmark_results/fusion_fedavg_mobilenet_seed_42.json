@@ -1,0 +1,334 @@
+{
+  "baseline": "fedavg_mobilenet",
+  "description": "Federated MobileNetV2 trained with vanilla FedAvg and no DP.",
+  "architecture": "mobilenet_v2",
+  "algorithm": "fedavg",
+  "differential_privacy": false,
+  "temporal_modeling": true,
+  "note": "Fusion pairs image and video samples by their client-local index and uses the facial ASD label; the source datasets do not provide subject-level matched pairs.",
+  "created_at_utc": "2026-07-12T20:36:04.456940+00:00",
+  "config": {
+    "modality": "fusion",
+    "data_dir": "D:\\WORK\\VScode\\Capstone\\autistic-children-facial-data-set",
+    "video_data_dir": "D:\\WORK\\VScode\\Capstone\\SSBD-file\\ssbd2",
+    "num_clients": 5,
+    "iid": false,
+    "dirichlet_alpha": 0.5,
+    "rounds": 50,
+    "local_epochs": 1,
+    "batch_size": 2,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0,
+    "fedprox_mu": 0.01,
+    "image_size": 224,
+    "sequence_length": 16,
+    "max_samples_per_class": 0,
+    "train_fraction": 0.7,
+    "validation_fraction": 0.15,
+    "pretrained": true,
+    "class_weighted_loss": true,
+    "early_stopping_patience": 5,
+    "seed": 42,
+    "num_workers": 0,
+    "output_dir": "D:\\WORK\\VScode\\Capstone\\asd-federated-learning\\benchmark_results",
+    "device": "cpu"
+  },
+  "dataset": {
+    "modality": "fusion",
+    "input_modalities": [
+      "facial_image",
+      "behavioral_video"
+    ],
+    "target_source": "facial ASD label (autistic/non_autistic)",
+    "class_names": [
+      "autistic",
+      "non_autistic"
+    ],
+    "train_samples": 128,
+    "validation_samples": 27,
+    "test_samples": 28,
+    "client_train_samples": [
+      26,
+      19,
+      4,
+      44,
+      35
+    ]
+  },
+  "model_parameters": 17561346,
+  "rounds_completed": 10,
+  "history": [
+    {
+      "round": 1,
+      "train_loss": 1.2758735320458072,
+      "validation": {
+        "loss": 0.6873909897274442,
+        "accuracy": 0.6296296296296297,
+        "balanced_accuracy": 0.6263736263736264,
+        "precision_macro": 0.6306818181818181,
+        "recall_macro": 0.6263736263736264,
+        "f1_macro": 0.625,
+        "f1_weighted": 0.6265432098765431,
+        "confusion_matrix": [
+          [
+            10,
+            4
+          ],
+          [
+            6,
+            7
+          ]
+        ],
+        "samples": 27,
+        "auc_roc": 0.6868131868131868
+      }
+    },
+    {
+      "round": 2,
+      "train_loss": 0.7031137482263148,
+      "validation": {
+        "loss": 0.6802546293647201,
+        "accuracy": 0.6666666666666666,
+        "balanced_accuracy": 0.6730769230769231,
+        "precision_macro": 0.6944444444444444,
+        "recall_macro": 0.6730769230769231,
+        "f1_macro": 0.6591865357643759,
+        "f1_weighted": 0.6573165030388032,
+        "confusion_matrix": [
+          [
+            7,
+            7
+          ],
+          [
+            2,
+            11
+          ]
+        ],
+        "samples": 27,
+        "auc_roc": 0.7582417582417583
+      }
+    },
+    {
+      "round": 3,
+      "train_loss": 0.6972942180000246,
+      "validation": {
+        "loss": 0.6728938751750522,
+        "accuracy": 0.6666666666666666,
+        "balanced_accuracy": 0.6675824175824177,
+        "precision_macro": 0.6675824175824177,
+        "recall_macro": 0.6675824175824177,
+        "f1_macro": 0.6666666666666666,
+        "f1_weighted": 0.6666666666666666,
+        "confusion_matrix": [
+          [
+            9,
+            5
+          ],
+          [
+            4,
+            9
+          ]
+        ],
+        "samples": 27,
+        "auc_roc": 0.7527472527472527
+      }
+    },
+    {
+      "round": 4,
+      "train_loss": 0.6693810669821687,
+      "validation": {
+        "loss": 0.5960367564801816,
+        "accuracy": 0.7037037037037037,
+        "balanced_accuracy": 0.7087912087912087,
+        "precision_macro": 0.723529411764706,
+        "recall_macro": 0.7087912087912087,
+        "f1_macro": 0.7,
+        "f1_weighted": 0.6987654320987654,
+        "confusion_matrix": [
+          [
+            8,
+            6
+          ],
+          [
+            2,
+            11
+          ]
+        ],
+        "samples": 27,
+        "auc_roc": 0.7527472527472528
+      }
+    },
+    {
+      "round": 5,
+      "train_loss": 0.6896884548477829,
+      "validation": {
+        "loss": 0.6210561637525205,
+        "accuracy": 0.7407407407407407,
+        "balanced_accuracy": 0.7472527472527473,
+        "precision_macro": 0.7777777777777777,
+        "recall_macro": 0.7472527472527473,
+        "f1_macro": 0.7349228611500701,
+        "f1_weighted": 0.7334683912524024,
+        "confusion_matrix": [
+          [
+            8,
+            6
+          ],
+          [
+            1,
+            12
+          ]
+        ],
+        "samples": 27,
+        "auc_roc": 0.8296703296703296
+      }
+    },
+    {
+      "round": 6,
+      "train_loss": 0.6728237057104707,
+      "validation": {
+        "loss": 0.5964269351076197,
+        "accuracy": 0.7037037037037037,
+        "balanced_accuracy": 0.7060439560439561,
+        "precision_macro": 0.7083333333333333,
+        "recall_macro": 0.7060439560439561,
+        "f1_macro": 0.7032967032967032,
+        "f1_weighted": 0.7028897028897029,
+        "confusion_matrix": [
+          [
+            9,
+            5
+          ],
+          [
+            3,
+            10
+          ]
+        ],
+        "samples": 27,
+        "auc_roc": 0.7692307692307693
+      }
+    },
+    {
+      "round": 7,
+      "train_loss": 0.7469148496857088,
+      "validation": {
+        "loss": 0.5666078284934715,
+        "accuracy": 0.5925925925925926,
+        "balanced_accuracy": 0.5989010989010989,
+        "precision_macro": 0.6111111111111112,
+        "recall_macro": 0.5989010989010989,
+        "f1_macro": 0.5834502103786816,
+        "f1_weighted": 0.5811646148252039,
+        "confusion_matrix": [
+          [
+            6,
+            8
+          ],
+          [
+            3,
+            10
+          ]
+        ],
+        "samples": 27,
+        "auc_roc": 0.8021978021978022
+      }
+    },
+    {
+      "round": 8,
+      "train_loss": 0.6408480180543847,
+      "validation": {
+        "loss": 0.7440759400250735,
+        "accuracy": 0.7037037037037037,
+        "balanced_accuracy": 0.7087912087912087,
+        "precision_macro": 0.723529411764706,
+        "recall_macro": 0.7087912087912087,
+        "f1_macro": 0.7,
+        "f1_weighted": 0.6987654320987654,
+        "confusion_matrix": [
+          [
+            8,
+            6
+          ],
+          [
+            2,
+            11
+          ]
+        ],
+        "samples": 27,
+        "auc_roc": 0.7692307692307693
+      }
+    },
+    {
+      "round": 9,
+      "train_loss": 0.7194238781521562,
+      "validation": {
+        "loss": 0.5632658037874434,
+        "accuracy": 0.6666666666666666,
+        "balanced_accuracy": 0.6703296703296704,
+        "precision_macro": 0.6761363636363636,
+        "recall_macro": 0.6703296703296704,
+        "f1_macro": 0.6648275862068966,
+        "f1_weighted": 0.6639080459770115,
+        "confusion_matrix": [
+          [
+            8,
+            6
+          ],
+          [
+            3,
+            10
+          ]
+        ],
+        "samples": 27,
+        "auc_roc": 0.7747252747252747
+      }
+    },
+    {
+      "round": 10,
+      "train_loss": 0.7232584676821716,
+      "validation": {
+        "loss": 0.5114271215818547,
+        "accuracy": 0.7407407407407407,
+        "balanced_accuracy": 0.7445054945054945,
+        "precision_macro": 0.7528409090909092,
+        "recall_macro": 0.7445054945054945,
+        "f1_macro": 0.7393103448275862,
+        "f1_weighted": 0.7385951468710089,
+        "confusion_matrix": [
+          [
+            9,
+            5
+          ],
+          [
+            2,
+            11
+          ]
+        ],
+        "samples": 27,
+        "auc_roc": 0.8516483516483516
+      }
+    }
+  ],
+  "test_metrics": {
+    "loss": 0.5652549373252052,
+    "accuracy": 0.7857142857142857,
+    "balanced_accuracy": 0.7857142857142858,
+    "precision_macro": 0.8111111111111111,
+    "recall_macro": 0.7857142857142858,
+    "f1_macro": 0.78125,
+    "f1_weighted": 0.78125,
+    "confusion_matrix": [
+      [
+        9,
+        5
+      ],
+      [
+        1,
+        13
+      ]
+    ],
+    "samples": 28,
+    "auc_roc": 0.8622448979591837
+  },
+  "checkpoint": "D:\\WORK\\VScode\\Capstone\\asd-federated-learning\\benchmark_results\\fusion_fedavg_mobilenet_seed_42.pt"
+}

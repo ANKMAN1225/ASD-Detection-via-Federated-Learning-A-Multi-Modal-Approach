@@ -92,22 +92,21 @@ def _aggregate(results: Dict, modality: str, config: str, metric: str) -> Tuple[
     return float(stats["mean"]), float(stats["std"])
 
 
-def plot_modality_accuracy(results: Dict, out_dir: str) -> None:
-    modalities = ["facial", "behavioral", "fusion"]
-    x = np.arange(len(modalities))
+def plot_fusion_accuracy(results: Dict, out_dir: str) -> None:
+    """Plot the fusion model's accuracy only."""
+    x = np.arange(1)
     width = 0.34
 
     iid_means = []
     iid_stds = []
     dp_means = []
     dp_stds = []
-    for modality in modalities:
-        mean, std = _aggregate(results, modality, IID_NAME, "accuracy")
-        iid_means.append(mean)
-        iid_stds.append(std)
-        mean, std = _aggregate(results, modality, DP_NAME, "accuracy")
-        dp_means.append(mean)
-        dp_stds.append(std)
+    mean, std = _aggregate(results, "fusion", IID_NAME, "accuracy")
+    iid_means.append(mean)
+    iid_stds.append(std)
+    mean, std = _aggregate(results, "fusion", DP_NAME, "accuracy")
+    dp_means.append(mean)
+    dp_stds.append(std)
 
     fig, ax = plt.subplots(figsize=(8.5, 5.2))
     bars_iid = ax.bar(
@@ -131,16 +130,16 @@ def plot_modality_accuracy(results: Dict, out_dir: str) -> None:
         alpha=0.9,
     )
 
-    ax.set_title("Accuracy Across Modalities")
+    ax.set_title("Fusion Accuracy Across Runs")
     ax.set_ylabel("Accuracy (%)")
     ax.set_xticks(x)
-    ax.set_xticklabels([MODALITY_LABELS[m] for m in modalities])
+    ax.set_xticklabels(["Fusion"])
     ax.set_ylim(0, 105)
     ax.legend(frameon=False)
     ax.bar_label(bars_iid, fmt="%.1f", padding=3, fontsize=9)
     ax.bar_label(bars_dp, fmt="%.1f", padding=3, fontsize=9)
 
-    save_fig(fig, out_dir, "fig1_modality_accuracy_errorbars.png")
+    save_fig(fig, out_dir, "fig1_fusion_accuracy_errorbars.png")
 
 
 def _per_seed_values(results: Dict, modality: str, config: str, metric: str) -> List[float]:
@@ -192,22 +191,21 @@ def plot_fusion_per_seed(results: Dict, out_dir: str) -> None:
     save_fig(fig, out_dir, "fig2_fusion_accuracy_by_seed.png")
 
 
-def plot_client_variance(results: Dict, out_dir: str) -> None:
-    modalities = ["facial", "behavioral", "fusion"]
-    x = np.arange(len(modalities))
+def plot_fusion_client_variance(results: Dict, out_dir: str) -> None:
+    """Plot fusion client-accuracy variance only."""
+    x = np.arange(1)
     width = 0.34
 
     iid_means = []
     iid_stds = []
     dp_means = []
     dp_stds = []
-    for modality in modalities:
-        mean, std = _aggregate(results, modality, IID_NAME, "client_accuracy_variance")
-        iid_means.append(mean)
-        iid_stds.append(std)
-        mean, std = _aggregate(results, modality, DP_NAME, "client_accuracy_variance")
-        dp_means.append(mean)
-        dp_stds.append(std)
+    mean, std = _aggregate(results, "fusion", IID_NAME, "client_accuracy_variance")
+    iid_means.append(mean)
+    iid_stds.append(std)
+    mean, std = _aggregate(results, "fusion", DP_NAME, "client_accuracy_variance")
+    dp_means.append(mean)
+    dp_stds.append(std)
 
     fig, ax = plt.subplots(figsize=(8.5, 5.2))
     ax.bar(
@@ -231,13 +229,13 @@ def plot_client_variance(results: Dict, out_dir: str) -> None:
         alpha=0.9,
     )
 
-    ax.set_title("Client Accuracy Variance")
+    ax.set_title("Fusion Client Accuracy Variance")
     ax.set_ylabel("Variance of client accuracy")
     ax.set_xticks(x)
-    ax.set_xticklabels([MODALITY_LABELS[m] for m in modalities])
+    ax.set_xticklabels(["Fusion"])
     ax.legend(frameon=False)
 
-    save_fig(fig, out_dir, "fig3_client_accuracy_variance.png")
+    save_fig(fig, out_dir, "fig3_fusion_client_accuracy_variance.png")
 
 
 def plot_fusion_metrics(results: Dict, out_dir: str) -> None:
@@ -366,30 +364,29 @@ def write_summary_table(results: Dict, out_dir: str) -> None:
         "",
         "Values are mean +/- std across saved runs.",
         "",
-        "| Modality | Config | Accuracy | Precision | Recall | F1 | Client variance |",
+        "| Model | Config | Accuracy | Precision | Recall | F1 | Client variance |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
-    for modality in ["facial", "behavioral", "fusion"]:
-        for config in [IID_NAME, DP_NAME]:
-            values = {}
-            for metric in ["accuracy", "precision", "recall", "f1", "client_accuracy_variance"]:
-                mean, std = _aggregate(results, modality, config, metric)
-                values[metric] = f"{mean:.2f} +/- {std:.2f}"
-            lines.append(
-                "| "
-                + " | ".join(
-                    [
-                        MODALITY_LABELS[modality],
-                        "IID" if config == IID_NAME else "Non-IID + DP",
-                        values["accuracy"],
-                        values["precision"],
-                        values["recall"],
-                        values["f1"],
-                        values["client_accuracy_variance"],
-                    ]
-                )
-                + " |"
+    for config in [IID_NAME, DP_NAME]:
+        values = {}
+        for metric in ["accuracy", "precision", "recall", "f1", "client_accuracy_variance"]:
+            mean, std = _aggregate(results, "fusion", config, metric)
+            values[metric] = f"{mean:.2f} +/- {std:.2f}"
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    "Fusion",
+                    "IID" if config == IID_NAME else "Non-IID + DP",
+                    values["accuracy"],
+                    values["precision"],
+                    values["recall"],
+                    values["f1"],
+                    values["client_accuracy_variance"],
+                ]
             )
+            + " |"
+        )
 
     lines.extend(
         [
@@ -421,9 +418,9 @@ def main() -> None:
     results = load_results(args.results)
     ensure_dir(args.out_dir)
 
-    plot_modality_accuracy(results, args.out_dir)
+    plot_fusion_accuracy(results, args.out_dir)
     plot_fusion_per_seed(results, args.out_dir)
-    plot_client_variance(results, args.out_dir)
+    plot_fusion_client_variance(results, args.out_dir)
     plot_fusion_metrics(results, args.out_dir)
     plot_architecture_diagram(args.out_dir)
     write_summary_table(results, args.out_dir)

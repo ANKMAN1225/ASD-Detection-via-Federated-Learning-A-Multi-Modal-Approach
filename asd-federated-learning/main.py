@@ -33,6 +33,19 @@ def main() -> dict:
         help="Retrain even if saved model checkpoints exist.",
     )
     parser.add_argument(
+        "--evaluate-saved-models",
+        action="store_true",
+        help=(
+            "Evaluate the existing checkpoints without training. Fails if a "
+            "required checkpoint is missing."
+        ),
+    )
+    parser.add_argument(
+        "--no-plots",
+        action="store_true",
+        help="Print and save results without generating visualization files.",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -91,11 +104,12 @@ def main() -> dict:
         skip_facial=args.skip_facial,
         skip_fusion=args.skip_fusion,
         force_retrain=args.force_retrain,
+        evaluate_saved_models_only=args.evaluate_saved_models,
         experiment_names=experiment_names,
         random_seed=args.seed,
     )
 
-    run_complete_analysis(results, save_graphs=True)
+    run_complete_analysis(results, save_graphs=not args.no_plots)
     return results
 
 

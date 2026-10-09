@@ -89,7 +89,7 @@ dp_eval_acc_log: list = []
 
 
 def _extract_data(results: Dict[str, Any]) -> bool:
-    """Extract IID and DP data from results. Returns True if both exist."""
+    """Extract IID and DP fusion data from results. Returns True if both exist."""
     global iid_data, iid_rounds_data, iid_final, iid_rounds, iid_loss
     global iid_clients, iid_preds, iid_targets, iid_metrics, iid_eval_acc_log
     global dp_data, dp_rounds_data, dp_final, dp_rounds, dp_loss
@@ -100,16 +100,16 @@ def _extract_data(results: Dict[str, Any]) -> bool:
         return False
 
     iid_data = exp["IID_Distribution"]
-    if "facial_experiment" not in iid_data:
+    if "fusion_experiment" not in iid_data:
         return False
-    iid_facial = iid_data.get("facial_experiment", {})
-    iid_rounds_data = iid_facial.get("round_metrics", [])
-    iid_final = iid_facial.get("final_metrics", None)
+    iid_fusion = iid_data.get("fusion_experiment", {})
+    iid_rounds_data = iid_fusion.get("round_metrics", [])
+    iid_final = iid_fusion.get("final_metrics", None)
     if not iid_rounds_data or not iid_final:
         return False
-    iid_eval_acc_log = iid_data["facial_experiment"].get(
+    iid_eval_acc_log = iid_data["fusion_experiment"].get(
         "eval_accuracy_log",
-        iid_data["facial_experiment"].get("val_accuracy_log", []),
+        iid_data["fusion_experiment"].get("val_accuracy_log", []),
     )
     iid_rounds = list(range(1, len(iid_rounds_data) + 1))
     iid_loss = [r["avg_loss"] for r in iid_rounds_data]
@@ -121,16 +121,16 @@ def _extract_data(results: Dict[str, Any]) -> bool:
     iid_metrics = _get_metrics(iid_targets, iid_preds)
 
     dp_data = exp["With_Differential_Privacy"]
-    if "facial_experiment" not in dp_data:
+    if "fusion_experiment" not in dp_data:
         return False
-    dp_facial = dp_data.get("facial_experiment", {})
-    dp_rounds_data = dp_facial.get("round_metrics", [])
-    dp_final = dp_facial.get("final_metrics", None)
+    dp_fusion = dp_data.get("fusion_experiment", {})
+    dp_rounds_data = dp_fusion.get("round_metrics", [])
+    dp_final = dp_fusion.get("final_metrics", None)
     if not dp_rounds_data or not dp_final:
         return False
-    dp_eval_acc_log = dp_data["facial_experiment"].get(
+    dp_eval_acc_log = dp_data["fusion_experiment"].get(
         "eval_accuracy_log",
-        dp_data["facial_experiment"].get("val_accuracy_log", []),
+        dp_data["fusion_experiment"].get("val_accuracy_log", []),
     )
     dp_rounds = list(range(1, len(dp_rounds_data) + 1))
     dp_loss = [r["avg_loss"] for r in dp_rounds_data]
@@ -716,8 +716,8 @@ def print_detailed_results(results: Dict[str, Any]) -> None:
         dp_str = "Enabled" if config.get("use_differential_privacy") else "Disabled"
         print(f"   - Differential Privacy: {dp_str}")
 
-        facial_exp = exp_data.get("facial_experiment", {})
-        round_metrics = facial_exp.get("round_metrics", [])
+        fusion_exp = exp_data.get("fusion_experiment", {})
+        round_metrics = fusion_exp.get("round_metrics", [])
         if round_metrics:
             print(
                 "\nTraining: "
@@ -725,7 +725,7 @@ def print_detailed_results(results: Dict[str, Any]) -> None:
                 f"Final {round_metrics[-1]['avg_loss']:.4f}"
             )
 
-        final_metrics = facial_exp.get("final_metrics", {})
+        final_metrics = fusion_exp.get("final_metrics", {})
         if final_metrics:
             print(
                 f"\nFinal Global Accuracy: {final_metrics.get('global_accuracy', 0):.2f}%"
@@ -746,8 +746,8 @@ def generate_research_summary(results: Dict[str, Any]) -> None:
 
     all_acc = []
     for exp_data in filtered.values():
-        if exp_data and "facial_experiment" in exp_data:
-            fm = exp_data["facial_experiment"].get("final_metrics", {})
+        if exp_data and "fusion_experiment" in exp_data:
+            fm = exp_data["fusion_experiment"].get("final_metrics", {})
             if fm:
                 all_acc.append(fm.get("global_accuracy", 0))
 
@@ -761,7 +761,7 @@ def generate_research_summary(results: Dict[str, Any]) -> None:
 def create_comparison_table(results: Dict[str, Any]) -> None:
     """Create detailed comparison table."""
     print("\n" + "=" * 80)
-    print("DETAILED COMPARISON TABLE")
+    print("DETAILED FUSION COMPARISON TABLE")
     print("=" * 80)
 
     exp = results.get("experimental_results", {})
@@ -772,10 +772,10 @@ def create_comparison_table(results: Dict[str, Any]) -> None:
 
     table_data = []
     for exp_name, exp_data in filtered.items():
-        if exp_data and "facial_experiment" in exp_data:
-            fe = exp_data["facial_experiment"]
-            fm = fe.get("final_metrics", {})
-            rm = fe.get("round_metrics", [])
+        if exp_data and "fusion_experiment" in exp_data:
+            fusion = exp_data["fusion_experiment"]
+            fm = fusion.get("final_metrics", {})
+            rm = fusion.get("round_metrics", [])
             config = exp_data.get("config", {})
             acc = fm.get("global_accuracy", 0)
             rounds = len(rm)
